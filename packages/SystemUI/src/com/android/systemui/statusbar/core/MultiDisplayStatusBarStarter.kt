@@ -63,6 +63,7 @@ constructor(
     }
 
     private fun createAndStartComponentsForDisplay(displayId: Int) {
+        if (!org.wonad.desktop.broker.WonadNativeUi.allowStockDecorations(displayId)) return
         logger.logCreatingAndStartingComponents(displayId)
         createAndStartOrchestratorForDisplay(displayId)
         createAndStartInitializerForDisplay(displayId)

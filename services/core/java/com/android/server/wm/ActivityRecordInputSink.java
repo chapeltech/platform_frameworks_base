@@ -123,6 +123,14 @@ class ActivityRecordInputSink {
         }
         mInputWindowHandleWrapper.setDisplayId(mActivityRecord.getDisplayId());
 
+        // Only the exact authenticated transparent external shell may pass
+        // through its holes; no arbitrary Activity can disable its sink.
+        if (WonadNativeBridge.transparentShellInput(mActivityRecord)) {
+            mInputWindowHandleWrapper.setInputConfigMasked(InputConfig.NOT_TOUCHABLE,
+                    InputConfig.NOT_TOUCHABLE);
+            return mInputWindowHandleWrapper;
+        }
+
         if (blockTouchesFromTop) {
             // Early return if the caller explicitly specifies that an input sink is required on top
             // of the Activity to intercept the touch events.

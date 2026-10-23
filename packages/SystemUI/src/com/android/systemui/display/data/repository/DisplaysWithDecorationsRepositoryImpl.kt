@@ -49,6 +49,10 @@ constructor(
         val callback =
             object : CommandQueue.Callbacks {
                 override fun onDisplayAddSystemDecorations(displayId: Int) {
+                    if (!org.wonad.desktop.broker.WonadNativeUi.allowStockDecorations(displayId)) {
+                        trySend(Event.Remove(displayId))
+                        return
+                    }
                     if (ENABLE_DISPLAY_CONTENT_MODE_MANAGEMENT.isTrue()) {
                         trySend(Event.Add(displayId))
                     } else {

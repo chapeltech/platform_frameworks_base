@@ -86,6 +86,7 @@ class RootTaskDesksOrganizer(
     }
 
     override fun warmUpDefaultDesk(displayId: Int, userId: Int) {
+        if (!org.wonad.desktop.broker.WonadNativeUi.allowStockPolicy(displayId)) return
         logV("warmUpDefaultDesk in displayId=%d userId=%d", displayId, userId)
         // Check if a desk in this display is already created.
         deskRootsByDeskId.forEach { deskId, root ->
@@ -109,6 +110,10 @@ class RootTaskDesksOrganizer(
     }
 
     override fun createDesk(displayId: Int, userId: Int, callback: OnCreateCallback) {
+        if (!org.wonad.desktop.broker.WonadNativeUi.allowStockPolicy(displayId)) {
+            callback.onCreated(INVALID_TASK_ID)
+            return
+        }
         logV("createDesk in displayId=%d userId=%d", displayId, userId)
         // Find an existing desk that is not yet used by this user.
         val unassignedDesk = firstUnassignedDesk(displayId, userId)
@@ -125,10 +130,8 @@ class RootTaskDesksOrganizer(
             createDeskRootRequests +=
                 unassignedRequest.copy(
                     userId = userId,
-                    onCreateCallback = { deskId ->
-                        unassignedRequest.onCreateCallback.onCreated(deskId)
-                        callback.onCreated(deskId)
-                    },
+                    onCreateCallback = { deskId -> completeCreateCallbacks(
+                        listOf(unassignedRequest.onCreateCallback, callback), deskId) },
                 )
             return
         }
@@ -138,6 +141,7 @@ class RootTaskDesksOrganizer(
 
     @Deprecated("Use createDesk() instead.", replaceWith = ReplaceWith("createDesk()"))
     override fun createDeskImmediate(displayId: Int, userId: Int): Int? {
+        if (!org.wonad.desktop.broker.WonadNativeUi.allowStockPolicy(displayId)) return null
         logV("createDeskImmediate in displayId=%d userId=%d", displayId, userId)
         // Find an existing desk that is not yet used by this user.
         val unassignedDesk = firstUnassignedDesk(displayId, userId)
@@ -158,6 +162,10 @@ class RootTaskDesksOrganizer(
     }
 
     private fun createDeskRoot(displayId: Int, userId: Int?, callback: OnCreateCallback) {
+        if (!org.wonad.desktop.broker.WonadNativeUi.allowStockPolicy(displayId)) {
+            callback.onCreated(INVALID_TASK_ID)
+            return
+        }
         logV("createDeskRoot in display: %d for user: %d", displayId, userId)
         val taskProperties =
             TaskPropertiesRequest()
@@ -178,12 +186,13 @@ class RootTaskDesksOrganizer(
                 displayId,
                 userId,
             )
+            callback.onCreated(INVALID_TASK_ID)
             return
         }
         val deskId = taskAppearedInfo.taskInfo.taskId
         logV("createDeskRoot created desk root using taskId=%d", deskId)
-        createDeskRootRequests += CreateDeskRequest(deskId, displayId, userId, callback)
         val token = taskAppearedInfo.taskInfo.token
+        createDeskRootRequests += CreateDeskRequest(deskId, token, displayId, userId, callback)
         val wct = WindowContainerTransaction()
         if (Flags.enableBackNavigationDesktopAppNoMinimize()) {
             wct.setInterceptBackPressedOnTaskRoot(token, /* interceptBackPressed= */ true)
@@ -592,6 +601,29 @@ class RootTaskDesksOrganizer(
             addChildToMinimizationRoot(taskId = taskId, deskId = deskId)
             return
         }
+        // A root requested before native takeover may appear afterwards.
+        // Keep ordinary child callbacks above; suppress only exact pending
+        // root callbacks, not all tasks or another display's requests.
+        if (!org.wonad.desktop.broker.WonadNativeUi.allowStockPolicy(taskInfo.displayId)) {
+            val desk = createDeskRootRequests.filter {
+                it.deskId == taskInfo.taskId && it.displayId == taskInfo.displayId &&
+                    it.token.asBinder() == taskInfo.token.asBinder()
+            }
+            val minimized = createDeskMinimizationRootRequests.filter {
+                it.rootId == taskInfo.taskId && it.displayId == taskInfo.displayId &&
+                    it.token.asBinder() == taskInfo.token.asBinder()
+            }
+            if (desk.isNotEmpty() || minimized.isNotEmpty()) {
+                createDeskRootRequests.removeAll(desk)
+                createDeskMinimizationRootRequests.removeAll(minimized)
+                failCreateRequests(
+                    callbacks = desk.map { it.onCreateCallback } + minimized.map { it.callback },
+                    appearedRoot = taskInfo,
+                    deskIds = minimized.map { it.deskId }.toSet(),
+                )
+                return
+            }
+        }
         // The appearing task is a root (either a desk or a minimization root), it should not exist
         // already.
         check(taskInfo.taskId !in deskRootsByDeskId) {
@@ -612,7 +644,8 @@ class RootTaskDesksOrganizer(
         // Check if there's any pending desk creation requests under this display.
         val deskRequest =
             createDeskRootRequests.firstOrNull {
-                it.deskId == taskInfo.taskId && it.displayId == appearingInDisplayId
+                it.deskId == taskInfo.taskId && it.displayId == appearingInDisplayId &&
+                    it.token.asBinder() == taskInfo.token.asBinder()
             }
         if (deskRequest != null) {
             // Appearing root matches desk request.
@@ -647,7 +680,8 @@ class RootTaskDesksOrganizer(
         // Check if there's any pending minimization container creation requests under this display.
         val deskMinimizationRootRequest =
             createDeskMinimizationRootRequests.firstOrNull {
-                it.rootId == taskInfo.taskId && it.displayId == appearingInDisplayId
+                it.rootId == taskInfo.taskId && it.displayId == appearingInDisplayId &&
+                    it.token.asBinder() == taskInfo.token.asBinder()
             }
         if (deskMinimizationRootRequest == null) {
             logE(
@@ -730,6 +764,25 @@ class RootTaskDesksOrganizer(
     }
 
     private fun handleTaskVanished(taskInfo: RunningTaskInfo) {
+        // A retired/preempted root can vanish before its appeared callback.
+        // Complete every exact waiter once rather than silently deleting it.
+        val vanishedToken = taskInfo.token.asBinder()
+        val deskRequests = createDeskRootRequests.filter {
+            it.deskId == taskInfo.taskId && it.token.asBinder() == vanishedToken
+        }
+        val exactVanishedDesk = deskRootsByDeskId[taskInfo.taskId]?.token?.asBinder() == vanishedToken
+        val minimizedRequests = createDeskMinimizationRootRequests.filter {
+            (it.rootId == taskInfo.taskId && it.token.asBinder() == vanishedToken) ||
+                (it.deskId == taskInfo.taskId && exactVanishedDesk)
+        }
+        createDeskRootRequests.removeAll(deskRequests)
+        createDeskMinimizationRootRequests.removeAll(minimizedRequests)
+        if (deskRequests.isNotEmpty() || minimizedRequests.isNotEmpty())
+            failCreateRequests(deskRequests.map { it.onCreateCallback } +
+                minimizedRequests.map { it.callback },
+                pendingRoots = minimizedRequests.filter { it.token.asBinder() != vanishedToken }
+                    .map { it.token },
+                deskIds = minimizedRequests.map { it.deskId }.toSet())
         if (deskRootsByDeskId.contains(taskInfo.taskId)) {
             val deskId = taskInfo.taskId
             val deskRoot = deskRootsByDeskId[deskId]
@@ -774,11 +827,78 @@ class RootTaskDesksOrganizer(
         childLeashes.remove(taskInfo.taskId)
     }
 
+    /** A warm-up waiter and a real creator can share one root request. Never
+     * let either callback's supported or fatal failure strand the other. */
+    private fun completeCreateCallbacks(callbacks: List<OnCreateCallback>, deskId: Int) {
+        var supported: Throwable? = null
+        var fatal: Throwable? = null
+        callbacks.forEach { callback ->
+            try {
+                callback.onCreated(deskId)
+            } catch (error: Throwable) {
+                val first = if (error is Exception || error is LinkageError) supported else fatal
+                if (first == null) {
+                    if (error is Exception || error is LinkageError) supported = error else fatal = error
+                } else if (first !== error) first.addSuppressed(error)
+            }
+        }
+        fatal?.let { terminal ->
+            supported?.let { if (it !== terminal) terminal.addSuppressed(it) }
+            throw terminal
+        }
+        supported?.let { throw it }
+    }
+
+    /** Complete every waiting stock creator exactly once and remove roots
+     * which cannot be admitted after takeover or partial creation failure. */
+    private fun failCreateRequests(
+        callbacks: List<OnCreateCallback>,
+        appearedRoot: RunningTaskInfo? = null,
+        pendingRoots: List<WindowContainerToken> = emptyList(),
+        deskIds: Set<Int> = emptySet(),
+    ) {
+        val transaction = WindowContainerTransaction()
+        appearedRoot?.let { transaction.removeRootTask(it.token) }
+        pendingRoots.forEach { transaction.removeRootTask(it) }
+        deskIds.forEach { deskId ->
+            deskRootsByDeskId[deskId]?.let { transaction.removeRootTask(it.token) }
+            deskRootsByDeskId.remove(deskId)
+            removeDeskRootRequests.remove(deskId)
+        }
+        var supported: Throwable? = null
+        var fatal: Throwable? = null
+        fun record(error: Throwable) {
+            val first = if (error is Exception || error is LinkageError) supported else fatal
+            if (first == null) {
+                if (error is Exception || error is LinkageError) supported = error else fatal = error
+            } else if (first !== error) first.addSuppressed(error)
+        }
+        if (!transaction.isEmpty) try {
+            shellTaskOrganizer.applyTransaction(transaction)
+        } catch (error: Throwable) {
+            record(error)
+        }
+        try {
+            completeCreateCallbacks(callbacks, INVALID_TASK_ID)
+        } catch (error: Throwable) {
+            record(error)
+        }
+        fatal?.let { terminal ->
+            supported?.let { if (it !== terminal) terminal.addSuppressed(it) }
+            throw terminal
+        }
+        supported?.let { throw it }
+    }
+
     private fun createDeskMinimizationRoot(
         displayId: Int,
         deskId: Int,
         callback: OnCreateCallback,
     ) {
+        if (!org.wonad.desktop.broker.WonadNativeUi.allowStockPolicy(displayId)) {
+            failCreateRequests(listOf(callback), deskIds = setOf(deskId))
+            return
+        }
         val taskProperties =
             TaskPropertiesRequest()
                 .setReparentOnDisplayRemoval(
@@ -794,11 +914,13 @@ class RootTaskDesksOrganizer(
         val taskAppearedInfo = shellTaskOrganizer.createTask(params, this)
         if (taskAppearedInfo == null) {
             logE("Failed to create minimization root for desk #%d", deskId)
+            failCreateRequests(listOf(callback), deskIds = setOf(deskId))
             return
         }
         createDeskMinimizationRootRequests +=
             CreateDeskMinimizationRootRequest(
                 rootId = taskAppearedInfo.taskInfo.taskId,
+                token = taskAppearedInfo.taskInfo.token,
                 displayId = displayId,
                 deskId = deskId,
                 callback = callback,
@@ -878,6 +1000,7 @@ class RootTaskDesksOrganizer(
 
     private data class CreateDeskRequest(
         val deskId: Int,
+        val token: WindowContainerToken,
         val displayId: Int,
         val userId: Int?,
         val onCreateCallback: OnCreateCallback,
@@ -885,6 +1008,7 @@ class RootTaskDesksOrganizer(
 
     private data class CreateDeskMinimizationRootRequest(
         val rootId: Int,
+        val token: WindowContainerToken,
         val displayId: Int,
         val deskId: Int,
         val callback: OnCreateCallback,

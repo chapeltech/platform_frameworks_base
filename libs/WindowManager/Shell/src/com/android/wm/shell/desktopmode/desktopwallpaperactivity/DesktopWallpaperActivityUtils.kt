@@ -16,15 +16,29 @@
 
 package com.android.wm.shell.desktopmode.desktopwallpaperactivity
 
+import android.os.RemoteException
 import android.view.Display.DEFAULT_DISPLAY
+import android.view.WindowManagerGlobal
 import com.android.window.flags.Flags
 import com.android.wm.shell.desktopmode.ShellDesktopState
 
 /** Utility methods for the DesktopWallpaperActivity. */
 class DesktopWallpaperActivityUtils(private val desktopState: ShellDesktopState) {
     /** Determines if the display will show the DesktopWallpaperActivity, hiding the home screen. */
-    fun hasDesktopWallpaperActivityEnabled(displayId: Int): Boolean =
-        (displayId == DEFAULT_DISPLAY || Flags.enablePerDisplayDesktopWallpaperActivity()) &&
+    fun hasDesktopWallpaperActivityEnabled(displayId: Int): Boolean {
+        // A Wonad-owned external screen uses its own secondary home. Do not
+        // insert Android's fullscreen desktop wallpaper task above that home.
+        // This also respects normal non-decorated external displays.
+        if (displayId != DEFAULT_DISPLAY) {
+            val decorated = try {
+                WindowManagerGlobal.getWindowManagerService()?.shouldShowSystemDecors(displayId) == true
+            } catch (_: RemoteException) {
+                false
+            }
+            if (!decorated) return false
+        }
+        return (displayId == DEFAULT_DISPLAY || Flags.enablePerDisplayDesktopWallpaperActivity()) &&
             Flags.enableDesktopWindowingWallpaperActivity() &&
             !desktopState.shouldShowHomeBehindDesktop
+    }
 }

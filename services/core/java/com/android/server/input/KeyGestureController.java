@@ -621,6 +621,16 @@ final class KeyGestureController {
             return KEY_INTERCEPT_RESULT_NOT_CONSUMED;
         }
 
+        // Give only the fixed Rust desktop alphabet priority over stock Meta gestures.
+        // Actual capture still requires the exact live, trusted external lease. Other
+        // system keys, multi-key safety gestures and SecurePaste keep their order.
+        final boolean wonadShortcut =
+                org.wonad.server.input.WonadInputBridge.shortcutKey(keyCode);
+        if (wonadShortcut && org.wonad.server.input.WonadInputBridge.intercept(
+                mContext, mWindowManagerInternal, event, policyFlags)) {
+            return KEY_INTERCEPT_RESULT_CONSUMED;
+        }
+
         // TODO(b/358569822) Remove below once we have nicer API for listening to shortcuts
         if ((event.isMetaPressed() || KeyEvent.isMetaKey(event.getKeyCode()))
                 && shouldInterceptShortcuts(focus)) {
@@ -634,6 +644,11 @@ final class KeyGestureController {
         }
 
         // Allow focused window to capture key events
+        if (!wonadShortcut && org.wonad.server.input.WonadInputBridge.intercept(
+                mContext, mWindowManagerInternal, event, policyFlags)) {
+            return KEY_INTERCEPT_RESULT_CONSUMED;
+        }
+
         if (canFocusedWindowCaptureKeys(focus)) {
             return KEY_INTERCEPT_RESULT_NOT_CONSUMED;
         }
