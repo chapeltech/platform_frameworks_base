@@ -109,10 +109,12 @@ java_defaults {
 // Extracted defaults to maintain consistency between the compiled target and the lint target.
 java_defaults {
     name: "WindowManager-Shell-defaults",
+    srcs: [":wonad-broker-kotlin"],
     resource_dirs: [
         "res",
     ],
     static_libs: [
+        "WonadDesktopSdk",
         "android.gui.boxshadow-java",
         "//frameworks/base/libs/WindowManager/Shell/src/com/android/wm/shell/bubbles/user/model:bubbles-user-model",
         "//frameworks/base/packages/SystemUI/aconfig:com_android_systemui_flags_lib",

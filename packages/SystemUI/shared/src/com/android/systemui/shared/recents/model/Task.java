@@ -34,6 +34,7 @@ import android.graphics.drawable.Drawable;
 import android.os.Parcel;
 import android.os.Parcelable;
 import android.view.ViewDebug;
+import android.window.WindowContainerToken;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -66,6 +67,11 @@ public class Task {
         public final int userId;
         @ViewDebug.ExportedProperty(category="recents")
         public long lastActiveTime;
+
+        /** Exact native task identity for a live Recents card. A recycled task ID
+         * or refreshed timestamp alone must not authorize a desktop transfer. */
+        @Nullable
+        public WindowContainerToken token;
 
         /**
          * The id of the task was running from which display.
@@ -121,6 +127,7 @@ public class Task {
             this.sourceComponent = sourceComponent;
             this.userId = t.userId;
             this.lastActiveTime = t.lastActiveTime;
+            this.token = t.token;
             this.displayId = displayIdOverride;
             this.baseActivity = t.baseActivity;
             this.numActivities = t.numActivities;
@@ -239,6 +246,7 @@ public class Task {
             parcel.writeBoolean(isActivityStackTransparent);
             parcel.writeInt(topActivityType);
             parcel.writeBoolean(isTopActivityTransparent);
+            parcel.writeTypedObject(token, flags);
         }
 
         private static TaskKey readFromParcel(Parcel parcel) {
@@ -255,9 +263,11 @@ public class Task {
             boolean isActivityStackTransparent = parcel.readBoolean();
             int topActivityType = parcel.readInt();
             boolean isTopActivityTransparent = parcel.readBoolean();
-            return new TaskKey(id, windowingMode, baseIntent, sourceComponent, userId,
+            TaskKey key = new TaskKey(id, windowingMode, baseIntent, sourceComponent, userId,
                     lastActiveTime, displayId, baseActivity, numActivities, isTopActivityNoDisplay,
                     isActivityStackTransparent, topActivityType, isTopActivityTransparent);
+            key.token = parcel.readTypedObject(WindowContainerToken.CREATOR);
+            return key;
         }
 
         @Override
