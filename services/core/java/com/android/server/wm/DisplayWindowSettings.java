@@ -486,6 +486,21 @@ class DisplayWindowSettings {
      * Called when the given {@link DisplayContent} is removed to cleanup.
      */
     void onDisplayRemoved(@NonNull DisplayContent dc) {
+        final DisplayInfo removed = dc.getDisplayInfo();
+        if (removed.type == Display.TYPE_VIRTUAL || removed.type == Display.TYPE_OVERLAY) {
+            // A disconnect transition may outlive a replacement with the same stable ID.
+            // Virtual settings are keyed by that ID, not by the old logical display ID.
+            // Do not let delayed teardown erase the replacement's desktop/IME settings.
+            for (int i = mService.mRoot.getChildCount() - 1; i >= 0; --i) {
+                final DisplayContent replacement = mService.mRoot.getChildAt(i);
+                if (replacement != dc && !replacement.isRemoving() && !replacement.isRemoved()
+                        && replacement.mDisplay.isValid()
+                        && replacement.getDisplayInfo().type == removed.type
+                        && Objects.equals(replacement.getDisplayInfo().uniqueId, removed.uniqueId)) {
+                    return;
+                }
+            }
+        }
         mSettingsProvider.onDisplayRemoved(dc.getDisplayInfo());
     }
 

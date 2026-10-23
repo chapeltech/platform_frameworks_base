@@ -427,11 +427,15 @@ class TaskFragment extends WindowContainer<WindowContainer> {
     static final int FLAG_FORCE_HIDDEN_FOR_PINNED_TASK = 1;
     static final int FLAG_FORCE_HIDDEN_FOR_TASK_ORG = 1 << 1;
     static final int FLAG_FORCE_HIDDEN_FOR_TASK_FRAGMENT_ORG = 1 << 2;
+    static final int FLAG_FORCE_HIDDEN_FOR_WONAD = 1 << 3;
+    static final int FLAG_FORCE_HIDDEN_FOR_WONAD_POLICY = 1 << 4;
 
     @IntDef(prefix = {"FLAG_FORCE_HIDDEN_"}, value = {
             FLAG_FORCE_HIDDEN_FOR_PINNED_TASK,
             FLAG_FORCE_HIDDEN_FOR_TASK_ORG,
             FLAG_FORCE_HIDDEN_FOR_TASK_FRAGMENT_ORG,
+            FLAG_FORCE_HIDDEN_FOR_WONAD,
+            FLAG_FORCE_HIDDEN_FOR_WONAD_POLICY,
     }, flag = true)
     @interface FlagForceHidden {}
     protected int mForceHiddenFlags = 0;
@@ -1398,7 +1402,9 @@ class TaskFragment extends WindowContainer<WindowContainer> {
                 if (focusedApp == null || (focusedApp.getTask() != next.getTask()
                         && (!com.android.window.flags.Flags.fixMultiWindowTaskFocusChange()
                                 || next.getTask().compareTo(focusedApp.getTask()) > 0))) {
-                    taskDisplayArea.mDisplayContent.setFocusedApp(next);
+                    if (!WonadFocusBridge.keepResumedFocus(focusedApp, next)) {
+                        taskDisplayArea.mDisplayContent.setFocusedApp(next);
+                    }
                 }
             }
             ProtoLog.d(WM_DEBUG_STATES, "resumeTopActivity: Top activity "
@@ -2126,6 +2132,7 @@ class TaskFragment extends WindowContainer<WindowContainer> {
 
     @Override
     void addChild(WindowContainer child, int index) {
+        WonadNativeWallpaperRoutes.enforceReparent(child, this);
         mClearedTaskForReuse = false;
         mClearedTaskFragmentForPip = false;
         mClearedForReorderActivityToFront = false;

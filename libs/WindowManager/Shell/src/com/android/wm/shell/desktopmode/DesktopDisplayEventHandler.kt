@@ -227,6 +227,7 @@ class DesktopDisplayEventHandler(
         config: Configuration?,
         boundsChangeReady: Boolean = false,
     ) {
+        if (!org.wonad.desktop.broker.WonadNativeUi.allowStockPolicy(displayId)) return
         when {
             config == null -> {}
             dpiChangedAndInsetsReadyForDisplay(displayId) -> {
@@ -470,6 +471,7 @@ class DesktopDisplayEventHandler(
     }
 
     private fun shouldCreateOrWarmUpDesk(displayId: Int, repository: DesktopRepository): Boolean {
+        if (!org.wonad.desktop.broker.WonadNativeUi.allowStockPolicy(displayId)) return false
         if (displayId == Display.INVALID_DISPLAY) {
             logV("shouldCreateOrWarmUpDesk skipping reason: invalid display")
             return false

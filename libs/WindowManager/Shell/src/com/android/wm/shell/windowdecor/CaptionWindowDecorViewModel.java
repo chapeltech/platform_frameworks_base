@@ -296,6 +296,7 @@ public class CaptionWindowDecorViewModel implements WindowDecorViewModel, FocusT
     }
 
     private boolean shouldShowWindowDecor(RunningTaskInfo taskInfo) {
+        if (!org.wonad.desktop.broker.WonadNativeUi.allowStockPolicy(taskInfo.displayId)) return false;
         if (mDisplayController.getDisplay(taskInfo.displayId) == null) {
             // If DisplayController doesn't have it tracked, it could be a private/managed display.
             return false;

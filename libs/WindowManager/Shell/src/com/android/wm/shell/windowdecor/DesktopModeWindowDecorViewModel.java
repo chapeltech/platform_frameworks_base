@@ -649,6 +649,11 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
 
     @Override
     public void onTaskInfoChanged(RunningTaskInfo taskInfo) {
+        if (!org.wonad.desktop.broker.WonadNativeUi.allowStockPolicy(taskInfo.displayId)) {
+            destroyWindowDecoration(taskInfo);
+            return;
+        }
+
         final WindowDecorationWrapper decoration = mWindowDecorByTaskId.get(taskInfo.taskId);
         if (decoration == null) return;
         final RunningTaskInfo oldTaskInfo = decoration.getTaskInfo();
@@ -1807,6 +1812,7 @@ public class DesktopModeWindowDecorViewModel implements WindowDecorViewModel,
     }
 
     private boolean shouldCreateWindowDecor(RunningTaskInfo taskInfo) {
+        if (!org.wonad.desktop.broker.WonadNativeUi.allowStockPolicy(taskInfo.displayId)) return false;
         if (DesktopExperienceFlags.ENABLE_WINDOW_DECORATION_REFACTOR.isTrue()
                 && DesktopExperienceFlags.ENABLE_ADD_WINDOW_DECORATION_TO_ALL_TASKS.isTrue()) {
             return true;

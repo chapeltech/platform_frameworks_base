@@ -207,6 +207,10 @@ class ActivityStarter {
     private int mRealCallingUid;
     private ActivityOptions mOptions;
 
+    // Placement-only exception for an authenticated native desktop permission request. The
+    // source/result records remain intact so PermissionController can identify and reply to it.
+    private boolean mWonadPermissionOnPhone;
+
     // If the code is BAL_BLOCK, background activity can only be started in an existing task that
     // contains an activity with same uid, or if activity starts are enabled in developer options.
     @VisibleForTesting(visibility = VisibleForTesting.Visibility.PRIVATE)
@@ -784,6 +788,7 @@ class ActivityStarter {
         mCallingUid = starter.mCallingUid;
         mRealCallingUid = starter.mRealCallingUid;
         mOptions = starter.mOptions;
+        mWonadPermissionOnPhone = starter.mWonadPermissionOnPhone;
         mBalVerdict = starter.mBalVerdict;
 
         mLaunchTaskBehind = starter.mLaunchTaskBehind;
@@ -2313,6 +2318,10 @@ class ActivityStarter {
 
     /** Returns the leaf task where the target activity may be placed. */
     private Task computeTargetTask() {
+        if (mWonadPermissionOnPhone) {
+            // A separate phone task, WITHOUT NEW_TASK (which cancels ActivityResult).
+            return null;
+        }
         if (mStartActivity.resultTo == null && mInTask == null && !mAddingToTask
                 && (mLaunchFlags & FLAG_ACTIVITY_NEW_TASK) != 0) {
             // A new task should be created instead of using existing one.
@@ -2343,8 +2352,12 @@ class ActivityStarter {
 
     private void computeLaunchParams(ActivityRecord r, ActivityRecord sourceRecord,
             Task targetTask) {
-        mSupervisor.getLaunchParamsController().calculate(targetTask, r.info.windowLayout, r,
-                sourceRecord, mOptions, mRequest, PHASE_BOUNDS, mLaunchParams);
+        if (mWonadPermissionOnPhone) {
+            setWonadPermissionPhoneLaunchParams();
+        } else {
+            mSupervisor.getLaunchParamsController().calculate(targetTask, r.info.windowLayout, r,
+                    sourceRecord, mOptions, mRequest, PHASE_BOUNDS, mLaunchParams);
+        }
         mPreferredTaskDisplayArea = mLaunchParams.hasPreferredTaskDisplayArea()
                 ? mLaunchParams.mPreferredTaskDisplayArea
                 : mRootWindowContainer.getDefaultTaskDisplayArea();
@@ -2369,6 +2382,12 @@ class ActivityStarter {
         if (r.packageName == null) {
             ActivityOptions.abort(mOptions);
             return START_CLASS_NOT_FOUND;
+        }
+
+        // Retire/reject only the resolved platform Shell wallpaper on a
+        // native-owned attachment. Phone/default HOME policy is unchanged.
+        if (WonadNativeWallpapers.rejectsLaunch(mPreferredTaskDisplayArea, r)) {
+            return START_CANCELED;
         }
 
         // Do not start home activity if it cannot be launched on preferred display. We are not
@@ -2614,6 +2633,10 @@ class ActivityStarter {
      * should only be launched once.
      */
     private int deliverToCurrentTopIfNeeded(Task topRootTask, NeededUriGrants intentGrants) {
+        if (mWonadPermissionOnPhone) {
+            // Do not deliver to another caller's phone prompt or lose this request's resultTo.
+            return START_SUCCESS;
+        }
         final ActivityRecord top = topRootTask.topRunningActivity(mNotTop);
         final boolean dontStart = top != null
                 && top.mActivityComponent.equals(mStartActivity.mActivityComponent)
@@ -2796,6 +2819,7 @@ class ActivityStarter {
         mCallingUid = -1;
         mRealCallingUid = -1;
         mOptions = null;
+        mWonadPermissionOnPhone = false;
         mBalVerdict = BalVerdict.ALLOW_BY_DEFAULT;
 
         mLaunchTaskBehind = false;
@@ -2846,6 +2870,33 @@ class ActivityStarter {
             IVoiceInteractor voiceInteractor, BalVerdict balVerdict, int realCallingUid) {
         reset(false /* clearRequest */);
 
+        mWonadPermissionOnPhone = shouldRouteWonadPermissionToPhone(r, sourceRecord);
+        if (!mWonadPermissionOnPhone && mRequest.originatingPendingIntent != null
+                && sourceRecord != null && !sourceRecord.finishing
+                && sourceRecord.mUserId == r.mUserId
+                && WonadNativeBridge.isManagedPermissionSource(sourceRecord)) {
+            mWonadPermissionOnPhone = com.android.server.am.WonadLocationButtonRouting
+                    .shouldRouteToPhone(mRequest.originatingPendingIntent, r.info, r.intent,
+                            sourceRecord.getUid(), sourceRecord.mUserId, sourceRecord.packageName,
+                            realCallingUid, r.launchedFromUid,
+                            mService.getPackageManagerInternalLocked());
+        }
+        if (mWonadPermissionOnPhone) {
+            // Do not copy client placement: explicit task/root/TDA/fragment/bounds and remote
+            // transitions could otherwise bring this trusted prompt back onto the desktop.
+            r.abortAndClearOptionsAnimation();
+            // ActivityRecord caches these separately from its pending options at construction.
+            r.mHandoverTaskDisplayArea = null;
+            r.mHandoverLaunchDisplayId = DEFAULT_DISPLAY;
+            r.mLaunchRootTask = null;
+            r.mRequestedLaunchingTaskFragmentToken = null;
+            r.mLaunchTaskBehind = false;
+            options = makeWonadPermissionPhoneOptions();
+            r.updateOptionsLocked(options);
+            inTask = null;
+            inTaskFragment = null;
+        }
+
         mStartActivity = r;
         mIntent = r.intent;
         mOptions = options;
@@ -2861,8 +2912,12 @@ class ActivityStarter {
 
         // Preferred display id is the only state we need for now and it could be updated again
         // after we located a reusable task (which might be resided in another display).
-        mSupervisor.getLaunchParamsController().calculate(inTask, r.info.windowLayout, r,
-                sourceRecord, options, mRequest, PHASE_DISPLAY, mLaunchParams);
+        if (mWonadPermissionOnPhone) {
+            setWonadPermissionPhoneLaunchParams();
+        } else {
+            mSupervisor.getLaunchParamsController().calculate(inTask, r.info.windowLayout, r,
+                    sourceRecord, options, mRequest, PHASE_DISPLAY, mLaunchParams);
+        }
         mPreferredTaskDisplayArea = mLaunchParams.hasPreferredTaskDisplayArea()
                 ? mLaunchParams.mPreferredTaskDisplayArea
                 : mRootWindowContainer.getDefaultTaskDisplayArea();
@@ -2884,7 +2939,7 @@ class ActivityStarter {
             mLaunchFlags |= FLAG_ACTIVITY_NEW_TASK;
         }
 
-        if (mSourceRecord != null
+        if (!mWonadPermissionOnPhone && mSourceRecord != null
                 && !Objects.equals(r.info.requiredDisplayCategory,
                 mSourceRecord.info.requiredDisplayCategory)) {
             // Adding NEW_TASK flag for activity with display category attribute if the display
@@ -3018,6 +3073,49 @@ class ActivityStarter {
         }
     }
 
+    /** WM-global-lock only; no app-provided name/token is accepted as permission authority. */
+    @VisibleForTesting
+    boolean shouldRouteWonadPermissionToPhone(ActivityRecord r, ActivityRecord source) {
+        if (source == null || source.finishing || r.resultTo != source || r.requestCode < 0
+                || r.mUserId != source.mUserId || r.launchedFromUid != source.getUid()
+                || r.intent == null || r.info == null || r.info.applicationInfo == null
+                || r.info.targetActivity != null
+                || !PackageManager.ACTION_REQUEST_PERMISSIONS.equals(r.intent.getAction())
+                || !"com.android.permissioncontroller.permission.ui.GrantPermissionsActivity"
+                        .equals(r.info.name)
+                || (r.info.applicationInfo.flags & ApplicationInfo.FLAG_SYSTEM) == 0
+                || (r.intent.getFlags() & (FLAG_ACTIVITY_NEW_TASK | FLAG_ACTIVITY_NEW_DOCUMENT
+                        | Intent.FLAG_ACTIVITY_FORWARD_RESULT)) != 0) {
+            return false;
+        }
+        final PackageManagerInternal pm = mService.getPackageManagerInternalLocked();
+        final String[] controllers = pm.getKnownPackageNames(
+                com.android.server.pm.KnownPackages.PACKAGE_PERMISSION_CONTROLLER, r.mUserId);
+        if (controllers.length != 1 || !controllers[0].equals(r.info.packageName)) {
+            return false;
+        }
+        final int controllerUid = pm.getPackageUid(controllers[0], 0 /* flags */, r.mUserId);
+        return controllerUid >= 0 && controllerUid == r.getUid()
+                && UserHandle.getUserId(controllerUid) == r.mUserId
+                && WonadNativeBridge.isManagedPermissionSource(source);
+    }
+
+    @VisibleForTesting
+    static ActivityOptions makeWonadPermissionPhoneOptions() {
+        final ActivityOptions options = ActivityOptions.makeBasic();
+        options.setLaunchDisplayId(DEFAULT_DISPLAY);
+        options.setLaunchWindowingMode(WindowConfiguration.WINDOWING_MODE_FULLSCREEN);
+        return options;
+    }
+
+    private void setWonadPermissionPhoneLaunchParams() {
+        // Also discard persisted/product launch-parameter preferences for this permission UI.
+        mLaunchParams.reset();
+        mLaunchParams.mPreferredTaskDisplayArea = mRootWindowContainer.getDefaultTaskDisplayArea();
+        mLaunchParams.mWindowingMode = WindowConfiguration.WINDOWING_MODE_FULLSCREEN;
+        mLaunchParams.mIsTaskMoveDisallowed = true;
+    }
+
     private void sendNewTaskResultRequestIfNeeded() {
         if (mStartActivity.resultTo != null && (mLaunchFlags & FLAG_ACTIVITY_NEW_TASK) != 0) {
             // For whatever reason this activity is being launched into a new task...
@@ -3033,6 +3131,11 @@ class ActivityStarter {
     }
 
     private void computeLaunchingTaskFlags() {
+        if (mWonadPermissionOnPhone) {
+            // Keep the original result chain even when the external source is singleInstance.
+            // Task isolation is handled by computeTargetTask(), never by adding NEW_TASK.
+            return;
+        }
         // If the caller is not coming from another activity, but has given us an explicit task into
         // which they would like us to launch the new activity, then let's see about doing that.
         if (mSourceRecord == null && mInTask != null && mInTask.getRootTask() != null) {
@@ -3137,6 +3240,9 @@ class ActivityStarter {
      *                                  should be allowed to be reused for the new activity.
      */
     private Task resolveReusableTask(boolean includeLaunchedFromBubble) {
+        if (mWonadPermissionOnPhone) {
+            return null;
+        }
         // If a target task is specified, try to reuse that one
         if (mOptions != null && mOptions.getLaunchTaskId() != INVALID_TASK_ID) {
             Task launchTask = mRootWindowContainer.anyTaskForId(mOptions.getLaunchTaskId());
@@ -3342,7 +3448,8 @@ class ActivityStarter {
         final boolean toTop = !mLaunchTaskBehind && !avoidMoveToFront();
         final Task task = mTargetRootTask.reuseOrCreateTask(
                 mStartActivity.info, mIntent, mVoiceSession,
-                mVoiceInteractor, toTop, mStartActivity, mSourceRecord, mOptions);
+                mVoiceInteractor, toTop, mStartActivity,
+                mWonadPermissionOnPhone ? null : mSourceRecord, mOptions);
         task.mTransitionController.collectExistenceChange(task);
         addOrReparentStartingActivity(task, "setTaskFromReuseOrCreateNewTask");
 
@@ -3535,7 +3642,8 @@ class ActivityStarter {
             ActivityOptions aOptions) {
         final boolean onTop =
                 (aOptions == null || !aOptions.getAvoidMoveToFront()) && !mLaunchTaskBehind;
-        final Task sourceTask = mSourceRecord != null ? mSourceRecord.getTask() : null;
+        final Task sourceTask = !mWonadPermissionOnPhone && mSourceRecord != null
+                ? mSourceRecord.getTask() : null;
         return mRootWindowContainer.getOrCreateRootTask(r, aOptions, task, sourceTask, onTop,
                 mLaunchParams, launchFlags, mRequest.mOriginalCallerUid);
     }

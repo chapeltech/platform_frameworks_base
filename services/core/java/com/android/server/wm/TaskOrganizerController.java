@@ -431,6 +431,9 @@ class TaskOrganizerController extends ITaskOrganizerController.Stub {
         void dispose() {
             // Move organizer from managing specific windowing modes
             mTaskOrganizers.remove(mOrganizer.mTaskOrganizer);
+            // Preserve only Wonad's exact leased external app objects before root teardown.
+            WonadFocusBridge.onOrganizerDisposing(
+                    mService.mWindowManager, mOrganizer.getBinder(), mUid);
 
             // Update tasks currently managed by this organizer to the next one available if
             // possible.
@@ -620,6 +623,12 @@ class TaskOrganizerController extends ITaskOrganizerController.Stub {
      */
     ITaskOrganizer getTaskOrganizer() {
         return mTaskOrganizers.peekLast();
+    }
+
+    // Internal native-object ownership check; caller already holds WM's lock.
+    int getWonadOrganizerUid(ITaskOrganizer organizer) {
+        final TaskOrganizerState state = mTaskOrganizerStates.get(organizer.asBinder());
+        return state != null ? state.mUid : -1;
     }
 
     // Capture the animation surface control for activity's main window
