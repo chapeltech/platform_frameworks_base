@@ -3846,6 +3846,10 @@ class DesktopTasksController(
             logV("skipping handleRequest reason=triggerTask is null")
             return null
         }
+        if (!org.wonad.desktop.broker.WonadNativeUi.allowStockPolicy(triggerTask.displayId)) {
+            logV("skipping stock desktop policy: native Wonad attachment")
+            return null
+        }
         val windowingLayerChange = request.windowingLayerChange
         val recentsAnimationRunning =
             RecentsTransitionStateListener.isAnimating(recentsTransitionState)
@@ -6777,6 +6781,7 @@ class DesktopTasksController(
 
     /** Called when a task's info changes. */
     fun onTaskInfoChanged(taskInfo: RunningTaskInfo) {
+        if (!org.wonad.desktop.broker.WonadNativeUi.allowStockPolicy(taskInfo.displayId)) return
         val repository = userRepositories.getProfile(taskInfo.userId)
         val inImmersive = repository.isTaskInFullImmersiveState(taskInfo.taskId)
         val requestingImmersive = taskInfo.requestingImmersive
@@ -7047,6 +7052,42 @@ class DesktopTasksController(
             executeRemoteCallWithTaskPermission(controller, "moveTaskToExternalDisplay") { c ->
                 c.moveToNextDisplay(taskId, enterReason = transitionSource.getEnterReason())
             }
+        }
+
+        override fun canSendTaskToWonad(
+            taskId: Int,
+            userId: Int,
+            lastActiveTime: Long,
+            baseActivity: ComponentName?,
+            taskToken: IBinder?,
+        ): Boolean {
+            val caller = Binder.getCallingUid()
+            var allowed = false
+            executeRemoteCallWithTaskPermission(controller, "canSendTaskToWonad", { _ ->
+                val wonad = org.wonad.desktop.broker.WonadController.instance
+                allowed = wonad != null && wonad.trustedRecentsCaller(caller) &&
+                    wonad.canTransferFromRecents(taskId, userId, lastActiveTime, baseActivity,
+                        taskToken)
+            }, true /* blocking */)
+            return allowed
+        }
+
+        override fun sendTaskToWonad(
+            taskId: Int,
+            userId: Int,
+            lastActiveTime: Long,
+            baseActivity: ComponentName?,
+            taskToken: IBinder?,
+        ): Boolean {
+            val caller = Binder.getCallingUid()
+            var moved = false
+            executeRemoteCallWithTaskPermission(controller, "sendTaskToWonad", { _ ->
+                val wonad = org.wonad.desktop.broker.WonadController.instance
+                moved = wonad != null && wonad.trustedRecentsCaller(caller) &&
+                    wonad.transferFromRecents(taskId, userId, lastActiveTime, baseActivity,
+                        taskToken)
+            }, true /* blocking */)
+            return moved
         }
 
         override fun startLaunchIntentTransition(

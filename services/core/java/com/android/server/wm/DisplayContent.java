@@ -922,6 +922,8 @@ class DisplayContent extends RootDisplayArea implements WindowManagerPolicy.Disp
             return false;
         }
 
+        if (WonadFocusBridge.skipUnfocusedTask(this, w)) return false;
+
         // IME windows remain visibleRequested while switching apps to maintain a smooth animation.
         // This persists until the new app is focused, so they can be visibleRequested despite not
         // being visible to the user (i.e. occluded). These rank higher in the window hierarchy than
@@ -2622,6 +2624,7 @@ class DisplayContent extends RootDisplayArea implements WindowManagerPolicy.Disp
      * @see DisplayWindowPolicyController#getCustomHomeComponent() ()
      */
     @Nullable ComponentName getCustomHomeComponent() {
+        if (WonadUiBridge.owns(this)) return WonadUiBridge.secondaryHome(this);
         if (!isHomeSupported() || mDwpcHelper == null) {
             return null;
         }
@@ -3845,6 +3848,7 @@ class DisplayContent extends RootDisplayArea implements WindowManagerPolicy.Disp
 
     @Override
     void removeImmediately() {
+        WonadUiBridge.onRemoved(this);
         mDeferredRemoval = false;
         try {
             if (DesktopExperienceFlags.ENABLE_DISPLAY_CONTENT_MODE_MANAGEMENT.isTrue()
@@ -5186,9 +5190,10 @@ class DisplayContent extends RootDisplayArea implements WindowManagerPolicy.Disp
             // ImeInputTarget are different. Then later updateImeParent would be ignored when there
             // is no new IME control target to change the IME parent.
             final boolean forceUpdateImeParent = mImeControlTarget == mRemoteInsetsControlTarget
-                    && (mImeParent != null && mImeParent.getSurfaceControl() != null
+                    && (mImeParent != null && (mImeParent.getSurfaceControl() != null
                         && !mImeParent.getSurfaceControl().isSameSurface(
-                                mImeContainer.getParent().mSurfaceControl));
+                                mImeContainer.getParent().mSurfaceControl)
+                        || WonadNativeImeParents.needsParentUpdate(this, mImeParent)));
             updateImeControlTarget(forceUpdateImeParent);
 
             mInsetsStateController.getImeSourceProvider().onImeInputTargetChanged(target);
@@ -6874,6 +6879,7 @@ class DisplayContent extends RootDisplayArea implements WindowManagerPolicy.Disp
 
     void remove() {
         mRemoving = true;
+        WonadUiBridge.onRemoved(this);
 
         clearAllTasksOnDisplay(() -> {
             mRemoved = true;
