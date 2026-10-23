@@ -391,7 +391,8 @@ class LaunchParamsUtil {
         // Re-route to default display if the home activity doesn't support multi-display
         if (taskDisplayArea != null && activityRecord != null && activityRecord.isActivityTypeHome()
                 && !supervisor.mRootWindowContainer.canStartHomeOnDisplayArea(activityRecord.info,
-                taskDisplayArea, false /* allowInstrumenting */)) {
+                taskDisplayArea, WonadUiBridge.allowInstrumentedNativeHome(
+                        activityRecord.info, taskDisplayArea))) {
             taskDisplayArea = supervisor.mRootWindowContainer.getDefaultTaskDisplayArea();
             logger.accept("display-area-from-home=" + taskDisplayArea);
         }

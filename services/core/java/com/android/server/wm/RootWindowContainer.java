@@ -1292,6 +1292,12 @@ class RootWindowContainer extends WindowContainer<DisplayContent>
     @Nullable
     private Pair<ActivityInfo, Intent> getHomeIntentAndInfoForTaskDisplayArea(
             @NonNull TaskDisplayArea taskDisplayArea, int userId) {
+        return getHomeIntentAndInfoForTaskDisplayArea(taskDisplayArea, userId, false);
+    }
+
+    @Nullable
+    private Pair<ActivityInfo, Intent> getHomeIntentAndInfoForTaskDisplayArea(
+            @NonNull TaskDisplayArea taskDisplayArea, int userId, boolean allowInstrumenting) {
         Intent homeIntent;
         ActivityInfo aInfo;
         if (taskDisplayArea == getDefaultTaskDisplayArea()
@@ -1300,7 +1306,8 @@ class RootWindowContainer extends WindowContainer<DisplayContent>
             homeIntent = mService.getHomeIntent();
             aInfo = resolveHomeActivity(userId, homeIntent);
         } else if (shouldPlaceSecondaryHomeOnDisplayArea(taskDisplayArea)) {
-            Pair<ActivityInfo, Intent> info = resolveSecondaryHomeActivity(userId, taskDisplayArea);
+            Pair<ActivityInfo, Intent> info = resolveSecondaryHomeActivity(
+                    userId, taskDisplayArea, allowInstrumenting);
             aInfo = info.first;
             homeIntent = info.second;
         } else {
@@ -1439,7 +1446,7 @@ class RootWindowContainer extends WindowContainer<DisplayContent>
         }
 
         final Pair<ActivityInfo, Intent> homeActivityIntentPair =
-                getHomeIntentAndInfoForTaskDisplayArea(taskDisplayArea, userId);
+                getHomeIntentAndInfoForTaskDisplayArea(taskDisplayArea, userId, allowInstrumenting);
 
         if (homeActivityIntentPair == null) {
             return false;
@@ -1520,6 +1527,12 @@ class RootWindowContainer extends WindowContainer<DisplayContent>
     @VisibleForTesting
     Pair<ActivityInfo, Intent> resolveSecondaryHomeActivity(int userId,
             @NonNull TaskDisplayArea taskDisplayArea) {
+        return resolveSecondaryHomeActivity(userId, taskDisplayArea, false);
+    }
+
+    @VisibleForTesting
+    Pair<ActivityInfo, Intent> resolveSecondaryHomeActivity(int userId,
+            @NonNull TaskDisplayArea taskDisplayArea, boolean allowInstrumenting) {
         if (taskDisplayArea == getDefaultTaskDisplayArea()) {
             throw new IllegalArgumentException(
                     "resolveSecondaryHomeActivity: Should not be default task container");
@@ -1575,7 +1588,7 @@ class RootWindowContainer extends WindowContainer<DisplayContent>
 
         if (aInfo != null) {
             if (!canStartHomeOnDisplayArea(aInfo, taskDisplayArea,
-                    false /* allowInstrumenting */)) {
+                    allowInstrumenting)) {
                 aInfo = null;
             }
         }

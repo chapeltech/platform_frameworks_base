@@ -127,6 +127,12 @@ final class WindowContainerVisibilityHelperImpl implements WindowContainerVisibi
                 continue;
             }
 
+            // An authenticated native desktop Home is only its background.
+            // Keep all force-hidden, ancestor, lock-task and barrier checks above.
+            if (WonadNativeBridge.ignoreNativeHomeOcclusion(current, other)) {
+                continue;
+            }
+
             if (isForceLeafTaskNonOccluding && other.asTask() != null
                     && !other.asTask().isForceOpaque()) {
                 // Leaf Task is forced to be non-occluding unless it is force opaque.

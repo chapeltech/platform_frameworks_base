@@ -73,7 +73,11 @@ public interface WMComponent {
      */
     default void init() {
         getShell().onInit();
+        getWonadController().initialize();
     }
+
+    @WMSingleton
+    org.wonad.desktop.broker.WonadController getWonadController();
 
     // Interfaces provided to SysUI
 

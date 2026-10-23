@@ -23,6 +23,15 @@
     coreApp="true">
 
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.HIDE_OVERLAY_WINDOWS" />
+    <!-- Release a bounded callback worker if the separately signed, sole-package
+         Wonad UID permanently backpressures its one-way Binder receive queue. -->
+    <uses-permission android:name="android.permission.KILL_UID" />
+
+    <!-- Only the independently signed, OS-pinned Wonad APK may open its consent alias. -->
+    <permission android:name="org.wonad.desktop.permission.OPEN_OS_SETTINGS"
+        android:protectionLevel="signature|knownSigner"
+        android:knownCerts="@string/wonad_client_signer_sha256" />
 
     <!-- Used to read wallpaper -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
@@ -457,6 +466,21 @@
              up everything else.
              TODO: Should have an android:permission attribute
              -->
+        <!-- Each Binder call authenticates the separate Wonad APK's UID and pinned signer. -->
+        <service android:name="org.wonad.desktop.broker.WonadBrokerService"
+            android:exported="true" android:singleUser="true">
+            <intent-filter><action android:name="org.wonad.desktop.BIND" /></intent-filter>
+        </service>
+        <!-- DUMP reaches a runtime-gated debug-shell diagnostics path; ordinary apps cannot start it. -->
+        <activity android:name="org.wonad.desktop.broker.WonadSettingsActivity"
+            android:exported="true" android:permission="android.permission.DUMP"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar"
+            android:label="Wonad external desktop" />
+        <activity-alias android:name="org.wonad.desktop.broker.WonadClientSettingsActivity"
+            android:targetActivity="org.wonad.desktop.broker.WonadSettingsActivity"
+            android:exported="true"
+            android:permission="org.wonad.desktop.permission.OPEN_OS_SETTINGS" />
         <service android:name="SystemUIService"
             android:exported="true"
         />

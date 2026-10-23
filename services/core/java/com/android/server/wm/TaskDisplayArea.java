@@ -260,6 +260,7 @@ final class TaskDisplayArea extends DisplayArea<WindowContainer> {
 
     @Override
     void addChild(WindowContainer child, int position) {
+        WonadNativeWallpaperRoutes.enforceReparent(child, this);
         if (child.asTaskDisplayArea() != null) {
             if (DEBUG_ROOT_TASK) {
                 Slog.d(TAG_WM, "Set TaskDisplayArea=" + child + " on taskDisplayArea=" + this);
@@ -661,6 +662,7 @@ final class TaskDisplayArea extends DisplayArea<WindowContainer> {
         for (int i = 0; i < mChildren.size(); i++) {
             mChildren.get(i).assignChildLayers(t);
         }
+        WonadNativeBridge.assignShellLayers(this, t);
     }
 
     void assignRootTaskOrdering(SurfaceControl.Transaction t) {

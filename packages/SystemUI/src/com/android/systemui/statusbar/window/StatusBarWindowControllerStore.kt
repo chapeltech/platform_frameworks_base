@@ -48,12 +48,14 @@ constructor(
     ) {
 
     override fun createInstanceForDisplay(displayId: Int): StatusBarWindowController? {
+        if (!org.wonad.desktop.broker.WonadNativeUi.allowStockDecorations(displayId)) return null
         val displaySubcomponent = perDisplaySubcomponentRepo[displayId] ?: return null
         val statusBarDisplayContext =
             displayWindowPropertiesRepository.get(
                 displayId = displayId,
                 windowType = WindowManager.LayoutParams.TYPE_STATUS_BAR,
             ) ?: return null
+        if (!org.wonad.desktop.broker.WonadNativeUi.allowStockDecorations(displayId)) return null
         return controllerFactory.create(
             statusBarDisplayContext.context,
             statusBarDisplayContext.windowManager,
