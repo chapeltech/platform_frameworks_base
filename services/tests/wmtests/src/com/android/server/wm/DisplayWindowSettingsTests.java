@@ -657,6 +657,117 @@ public class DisplayWindowSettingsTests extends WindowTestsBase {
                 mPrivateDisplay.getDisplayInfo());
     }
 
+    private DisplayContent replacementTestDisplay(int type, String uniqueId) {
+        return new TestDisplayContent.Builder(mAtm, new DisplayInfo(mDisplayInfo))
+                .setType(type).setUniqueId(uniqueId).build();
+    }
+
+    private void assertReplacementKeepsActualSettings(int type) {
+        final DisplayWindowSettingsProvider provider = new DisplayWindowSettingsProvider(
+                new TestDisplayWindowSettingsProvider.TestStorage(),
+                new TestDisplayWindowSettingsProvider.TestStorage(),
+                mock(android.app.backup.BackupManager.class));
+        final DisplayWindowSettings settings = new DisplayWindowSettings(mWm, provider);
+        final DisplayContent old = replacementTestDisplay(type, "wonad-replacement");
+        final SettingsEntry oldSettings = new SettingsEntry();
+        oldSettings.mShouldShowSystemDecors = false;
+        oldSettings.mImePolicy = DISPLAY_IME_POLICY_FALLBACK_DISPLAY;
+        provider.updateOverrideSettings(old.getDisplayInfo(), oldSettings);
+
+        final DisplayContent replacement = replacementTestDisplay(type, "wonad-replacement");
+        assertNotEquals(old.getDisplayId(), replacement.getDisplayId());
+        final SettingsEntry replacementSettings = new SettingsEntry();
+        replacementSettings.mShouldShowSystemDecors = true;
+        replacementSettings.mImePolicy = DISPLAY_IME_POLICY_LOCAL;
+        provider.updateOverrideSettings(replacement.getDisplayInfo(), replacementSettings);
+        // Prove these distinct logical displays really share the provider's key.
+        assertEquals(replacementSettings, provider.getOverrideSettings(old.getDisplayInfo()));
+
+        settings.onDisplayRemoved(old);
+        assertEquals(replacementSettings,
+                provider.getOverrideSettings(replacement.getDisplayInfo()));
+        // The old DisplayContent may remain in the hierarchy during teardown,
+        // but its invalid logical display cannot protect the final removal.
+        doReturn(false).when(old.mDisplay).isValid();
+        settings.onDisplayRemoved(replacement);
+        final SettingsEntry cleared = provider.getOverrideSettings(replacement.getDisplayInfo());
+        org.junit.Assert.assertNull(cleared.mShouldShowSystemDecors);
+        org.junit.Assert.assertNull(cleared.mImePolicy);
+        assertTrue(cleared.isEmpty());
+    }
+
+    @Test
+    public void testVirtualReplacementKeepsSettingsUntilItsOwnRemoval() {
+        assertReplacementKeepsActualSettings(Display.TYPE_VIRTUAL);
+    }
+
+    @Test
+    public void testOverlayReplacementKeepsSettingsUntilItsOwnRemoval() {
+        assertReplacementKeepsActualSettings(Display.TYPE_OVERLAY);
+    }
+
+    @Test
+    public void testDifferentVirtualIdentityDoesNotBlockSettingsCleanup() {
+        final DisplayContent old = replacementTestDisplay(Display.TYPE_VIRTUAL, "wonad-old");
+        replacementTestDisplay(Display.TYPE_VIRTUAL, "wonad-other");
+        spyOn(mSettingsProvider);
+        mDisplayWindowSettings.onDisplayRemoved(old);
+        verify(mSettingsProvider).onDisplayRemoved(old.getDisplayInfo());
+    }
+
+    @Test
+    public void testInvalidVirtualReplacementDoesNotRetainSettings() {
+        final DisplayContent old = replacementTestDisplay(Display.TYPE_VIRTUAL, "wonad-invalid");
+        final DisplayContent replacement = replacementTestDisplay(
+                Display.TYPE_VIRTUAL, "wonad-invalid");
+        doReturn(false).when(replacement.mDisplay).isValid();
+        spyOn(mSettingsProvider);
+        mDisplayWindowSettings.onDisplayRemoved(old);
+        verify(mSettingsProvider).onDisplayRemoved(old.getDisplayInfo());
+    }
+
+    @Test
+    public void testDifferentDisplayTypeDoesNotBlockSettingsCleanup() {
+        final DisplayContent old = replacementTestDisplay(Display.TYPE_VIRTUAL, "wonad-same-id");
+        replacementTestDisplay(Display.TYPE_OVERLAY, "wonad-same-id");
+        spyOn(mSettingsProvider);
+        mDisplayWindowSettings.onDisplayRemoved(old);
+        verify(mSettingsProvider).onDisplayRemoved(old.getDisplayInfo());
+    }
+
+    @Test
+    public void testRemovingVirtualReplacementDoesNotRetainSettings() {
+        final DisplayContent old = replacementTestDisplay(Display.TYPE_VIRTUAL, "wonad-removing");
+        final DisplayContent replacement = replacementTestDisplay(
+                Display.TYPE_VIRTUAL, "wonad-removing");
+        assertTrue(replacement.mDisplay.isValid());
+        doReturn(true).when(replacement).isRemoving();
+        spyOn(mSettingsProvider);
+        mDisplayWindowSettings.onDisplayRemoved(old);
+        verify(mSettingsProvider).onDisplayRemoved(old.getDisplayInfo());
+    }
+
+    @Test
+    public void testRemovedVirtualReplacementDoesNotRetainSettings() {
+        final DisplayContent old = replacementTestDisplay(Display.TYPE_VIRTUAL, "wonad-removed");
+        final DisplayContent replacement = replacementTestDisplay(
+                Display.TYPE_VIRTUAL, "wonad-removed");
+        assertTrue(replacement.mDisplay.isValid());
+        doReturn(true).when(replacement).isRemoved();
+        spyOn(mSettingsProvider);
+        mDisplayWindowSettings.onDisplayRemoved(old);
+        verify(mSettingsProvider).onDisplayRemoved(old.getDisplayInfo());
+    }
+
+    @Test
+    public void testPhysicalDisplayRemovalStillDelegatesSettingsCleanup() {
+        final DisplayContent old = replacementTestDisplay(Display.TYPE_EXTERNAL, "wonad-physical");
+        replacementTestDisplay(Display.TYPE_EXTERNAL, "wonad-physical");
+        spyOn(mSettingsProvider);
+        mDisplayWindowSettings.onDisplayRemoved(old);
+        verify(mSettingsProvider).onDisplayRemoved(old.getDisplayInfo());
+    }
+
     @Test
     public void testClearDisplaySettings() {
         spyOn(mWm.mDisplayWindowSettings);

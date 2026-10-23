@@ -1096,8 +1096,11 @@ android_app {
     ],
     static_libs: [
         "SystemUI-application",
+        "WonadBrokerResources",
     ],
     resource_dirs: [],
+    jni_libs: ["libwonad_broker_jni"],
+    use_embedded_native_libs: false,
     enable_ksp: true,
 
     use_resource_processor: true,

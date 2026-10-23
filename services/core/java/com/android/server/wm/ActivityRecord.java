@@ -2864,6 +2864,7 @@ final class ActivityRecord extends WindowToken {
      * activity.
      */
     void reparent(TaskFragment newTaskFrag, int position, String reason) {
+        WonadNativeWallpaperRoutes.enforceReparent(this, newTaskFrag);
         if (getParent() == null) {
             Slog.w(TAG, "reparent: Attempted to reparent non-existing app token: " + token);
             return;

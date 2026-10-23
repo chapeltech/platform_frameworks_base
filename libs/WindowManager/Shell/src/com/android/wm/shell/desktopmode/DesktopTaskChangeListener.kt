@@ -51,6 +51,7 @@ class DesktopTaskChangeListener(
     }
 
     override fun onTaskOpening(taskInfo: RunningTaskInfo) {
+        if (excludeNativeWonad(taskInfo)) return
         val desktopRepository: DesktopRepository =
             desktopUserRepositories.getProfile(taskInfo.userId)
         val isFreeformTask = taskInfo.isFreeform
@@ -94,6 +95,7 @@ class DesktopTaskChangeListener(
     }
 
     override fun onTaskChanging(taskInfo: RunningTaskInfo) {
+        if (excludeNativeWonad(taskInfo)) return
         val desktopRepository: DesktopRepository =
             desktopUserRepositories.getProfile(taskInfo.userId)
         val isFreeformTask = taskInfo.isFreeform
@@ -162,6 +164,7 @@ class DesktopTaskChangeListener(
     // Any changes to [DesktopRepository] from this method should be made carefully to minimize risk
     // of race conditions and possible duplications with [onTaskChanging].
     override fun onNonTransitionTaskChanging(taskInfo: RunningTaskInfo) {
+        if (excludeNativeWonad(taskInfo)) return
         // TODO: b/367268953 - Propagate usages from FreeformTaskListener to this method.
         logD(
             "onNonTransitionTaskChanging for taskId=%d, displayId=%d",
@@ -176,6 +179,7 @@ class DesktopTaskChangeListener(
     // of race conditions and possible duplications with [onTaskClosing].
     @VisibleForTesting
     fun onNonTransitionTaskClosing(taskInfo: RunningTaskInfo) {
+        if (excludeNativeWonad(taskInfo)) return
         logD(
             "onNonTransitionTaskClosing for taskId=%d, displayId=%d",
             taskInfo.taskId,
@@ -197,6 +201,7 @@ class DesktopTaskChangeListener(
     }
 
     override fun onTaskMovingToFront(taskInfo: RunningTaskInfo) {
+        if (excludeNativeWonad(taskInfo)) return
         if (!desktopState.isDesktopModeSupportedOnDisplay(taskInfo.displayId)) {
             logD(
                 "onTaskMovingToFront for taskId=%d, displayId=%d - desktop not supported",
@@ -245,6 +250,7 @@ class DesktopTaskChangeListener(
     }
 
     override fun onTaskMovingToBack(taskInfo: RunningTaskInfo) {
+        if (excludeNativeWonad(taskInfo)) return
         if (!desktopState.isDesktopModeSupportedOnDisplay(taskInfo.displayId)) {
             logD(
                 "onTaskMovingToBack for taskId=%d, displayId=%d - desktop not supported",
@@ -279,6 +285,7 @@ class DesktopTaskChangeListener(
     }
 
     override fun onTaskClosing(taskInfo: RunningTaskInfo) {
+        if (excludeNativeWonad(taskInfo)) return
         if (!desktopState.isDesktopModeSupportedOnDisplay(taskInfo.displayId)) {
             logD(
                 "onTaskClosing for taskId=%d, displayId=%d - desktop not supported",
@@ -413,6 +420,33 @@ class DesktopTaskChangeListener(
                 logE("Failed to enable task as perceptible: %s", re)
             }
         }
+    }
+
+    /** Native Wonad roots use ordinary Android task lifecycle but never stock
+     * desk sizing, z order, minimization or persisted desktop bounds. Ownership
+     * stays sticky while parked. Evict a pre-takeover entry as well as refusing
+     * new admission; otherwise resolution/disconnect observers can still apply
+     * a cached stock desktop transaction to this exact ordinary task.
+     */
+    private fun excludeNativeWonad(taskInfo: RunningTaskInfo): Boolean {
+        if (org.wonad.desktop.broker.WonadNativeUi.allowStockPolicy(taskInfo.displayId)) return false
+        val repository = desktopUserRepositories.getProfile(taskInfo.userId)
+        val taskId = taskInfo.taskId
+        if (repository.getDeskIdForTask(taskId) != null || repository.isClosingTask(taskId)) {
+            repository.removeClosingTask(taskId)
+            repository.removeTask(taskId)
+        }
+        // Withdraw only this listener's own previous perceptible mark. Native
+        // WM visibility/resume/OOM handling continues normally; do not change
+        // another subsystem's mark or send a WCT/lifecycle/focus operation.
+        if (perceptibleTasks.remove(taskId)) {
+            try {
+                ActivityTaskManager.getService().setTaskIsPerceptible(taskId, false)
+            } catch (re: RemoteException) {
+                logE("Failed to withdraw stock perceptible task from native Wonad: %s", re)
+            }
+        }
+        return true
     }
 
     private fun isDesktopTask(taskInfo: RunningTaskInfo): Boolean =

@@ -16,6 +16,7 @@
 
 package com.android.wm.shell.desktopmode.multidesks
 
+import android.app.ActivityTaskManager.INVALID_TASK_ID
 import android.os.UserHandle
 import android.os.UserManager
 import android.view.Display.INVALID_DISPLAY
@@ -228,6 +229,7 @@ class DesksController(
             return
         }
         desksOrganizer.createDesk(displayId, userId) { deskId ->
+            if (deskId == INVALID_TASK_ID) { onResult(null); return@createDesk }
             logD(
                 "createDesk obtained deskId=%d for displayId=%d and userId=%d",
                 deskId,

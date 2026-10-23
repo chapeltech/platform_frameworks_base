@@ -58,6 +58,7 @@ import com.android.systemui.log.core.LogLevel;
 import com.android.systemui.res.R;
 import com.android.systemui.statusbar.data.repository.StatusBarConfigurationController;
 import com.android.systemui.statusbar.layout.StatusBarContentInsetsProvider;
+import com.android.systemui.statusbar.layout.StatusBarContentInsetsChangedListener;
 import com.android.systemui.statusbar.policy.ConfigurationController;
 import com.android.systemui.statusbar.window.StatusBarWindowModule.InternalWindowViewInflater;
 import com.android.systemui.unfold.UnfoldTransitionProgressProvider;
@@ -95,6 +96,8 @@ public class StatusBarWindowControllerImpl implements StatusBarWindowController 
     private WindowManager.LayoutParams mLp;
     private final WindowManager.LayoutParams mLpChanged;
     private final Binder mInsetsSourceOwner = new Binder();
+    private final StatusBarContentInsetsChangedListener mInsetsChangedListener =
+            this::calculateStatusBarLocationsForAllRotations;
 
     private final ConfigurationController.ConfigurationListener mConfigurationListener =
             new ConfigurationController.ConfigurationListener() {
@@ -162,6 +165,11 @@ public class StatusBarWindowControllerImpl implements StatusBarWindowController 
 
     @Override
     public void attach() {
+        if (!org.wonad.desktop.broker.WonadNativeUi.allowStockDecorations(mDisplayId)) {
+            stop();
+            return;
+        }
+        if (mIsAttached) return;
         mStatusBarWindowView.setStatusBarConfigurationController(mStatusBarConfigurationController);
         // Now that the status bar window encompasses the sliding panel and its
         // translucent backdrop, the entire thing is made TRANSLUCENT and is
@@ -183,12 +191,18 @@ public class StatusBarWindowControllerImpl implements StatusBarWindowController 
                             + mContext.getDisplayId()
                             + " doesn't exist anymore.",
                     e);
+            return;
+        }
+        if (!org.wonad.desktop.broker.WonadNativeUi.allowStockDecorations(mDisplayId)) {
+            mIsAttached = true; // The real add succeeded; remove that exact client view.
+            stop();
+            return;
         }
         mStatusBarConfigurationController.addCallback(mConfigurationListener);
         refreshStatusBarHeight();
         mLpChanged.copyFrom(mLp);
 
-        mContentInsetsProvider.addCallback(this::calculateStatusBarLocationsForAllRotations);
+        mContentInsetsProvider.addCallback(mInsetsChangedListener);
         calculateStatusBarLocationsForAllRotations();
         mIsAttached = true;
         apply(mCurrentState);
@@ -196,6 +210,8 @@ public class StatusBarWindowControllerImpl implements StatusBarWindowController 
 
     @Override
     public void stop() {
+        if (!mIsAttached) return;
+        mIsAttached = false;
         try {
             mWindowManager.removeView(mStatusBarWindowView);
             mMultiDisplayLogger.logStatusBarWindowRemoved(mDisplayId);
@@ -208,6 +224,7 @@ public class StatusBarWindowControllerImpl implements StatusBarWindowController 
             Log.e(TAG, "Failed to remove View from WindowManager. View was not attached", e);
         }
         mStatusBarConfigurationController.removeCallback(mConfigurationListener);
+        mContentInsetsProvider.removeCallback(mInsetsChangedListener);
     }
 
     @Override
