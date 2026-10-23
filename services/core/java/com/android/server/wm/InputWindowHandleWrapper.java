@@ -137,6 +137,31 @@ class InputWindowHandleWrapper {
         mChanged = true;
     }
 
+    /** Exact fixed-shell observation, after copying changes to the surface. */
+    boolean hasWonadRegion(Region expected) {
+        return !mChanged && !mHandle.replaceTouchableRegionWithCrop
+                && (mHandle.inputConfig & (InputConfig.NOT_VISIBLE
+                        | InputConfig.PAUSE_DISPATCHING
+                        | InputConfig.DROP_INPUT_IF_OBSCURED)) == 0
+                && mHandle.touchableRegion.equals(expected)
+                && (mHandle.inputConfig & InputConfig.NOT_FOCUSABLE) != 0
+                && (mHandle.inputConfig & InputConfig.TRUSTED_OVERLAY) != 0
+                && (mHandle.inputConfig & (InputConfig.SPY | InputConfig.DROP_INPUT)) == 0
+                && ((mHandle.inputConfig & InputConfig.NOT_TOUCHABLE) != 0) == expected.isEmpty();
+    }
+
+    boolean hasWonadObserver(Region expected) {
+        return !mChanged && !mHandle.replaceTouchableRegionWithCrop
+                && (mHandle.inputConfig & (InputConfig.NOT_VISIBLE
+                        | InputConfig.PAUSE_DISPATCHING
+                        | InputConfig.DROP_INPUT_IF_OBSCURED)) == 0
+                && mHandle.touchableRegion.equals(expected)
+                && (mHandle.inputConfig & InputConfig.NOT_FOCUSABLE) != 0
+                && (mHandle.inputConfig & InputConfig.TRUSTED_OVERLAY) != 0
+                && (mHandle.inputConfig & InputConfig.SPY) != 0
+                && (mHandle.inputConfig & (InputConfig.NOT_TOUCHABLE | InputConfig.DROP_INPUT)) == 0;
+    }
+
     void setTouchableRegion(Region region) {
         if (mHandle.touchableRegion.equals(region)) {
             return;

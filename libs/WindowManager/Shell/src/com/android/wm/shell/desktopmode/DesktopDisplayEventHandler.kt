@@ -227,6 +227,7 @@ class DesktopDisplayEventHandler(
         config: Configuration?,
         boundsChangeReady: Boolean = false,
     ) {
+        if (!org.wonad.desktop.broker.WonadNativeUi.allowStockPolicy(displayId)) return
         when {
             config == null -> {}
             dpiChangedAndInsetsReadyForDisplay(displayId) -> {
@@ -388,6 +389,10 @@ class DesktopDisplayEventHandler(
                     .map { task -> task.taskId }
             preservedTasks.removeAll { taskId -> excludedFromRestoreTasks.contains(taskId) }
         }
+        preservedTasks.removeAll { taskId ->
+            org.wonad.desktop.broker.WonadController.instance
+                ?.retainsTaskForReconnect(taskId, userRepository.userId) == true
+        }
         if (preservedTasks.isEmpty()) {
             // If we don't restore anything, skip the restoration and return false so we
             // create a default desk.
@@ -470,6 +475,7 @@ class DesktopDisplayEventHandler(
     }
 
     private fun shouldCreateOrWarmUpDesk(displayId: Int, repository: DesktopRepository): Boolean {
+        if (!org.wonad.desktop.broker.WonadNativeUi.allowStockPolicy(displayId)) return false
         if (displayId == Display.INVALID_DISPLAY) {
             logV("shouldCreateOrWarmUpDesk skipping reason: invalid display")
             return false

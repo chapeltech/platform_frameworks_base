@@ -545,6 +545,19 @@ public class TaskFragmentOrganizerController extends ITaskFragmentOrganizerContr
     }
 
     @Nullable
+    ActivityRecord peekReparentActivityFromTemporaryToken(
+            @Nullable ITaskFragmentOrganizer organizer, @Nullable IBinder activityToken) {
+        if (organizer == null || activityToken == null) {
+            return null;
+        }
+        final TaskFragmentOrganizerState state = mTaskFragmentOrganizerState.get(
+                organizer.asBinder());
+        return state != null
+                ? state.mTemporaryActivityTokens.get(activityToken)
+                : null;
+    }
+
+    @Nullable
     ActivityRecord getReparentActivityFromTemporaryToken(
             @Nullable ITaskFragmentOrganizer organizer, @Nullable IBinder activityToken) {
         if (organizer == null || activityToken == null) {

@@ -1,5 +1,9 @@
 -include proguard_common.flags
 
+# Private JNI symbol names and the independently maintained APK's Binder ABI.
+-keep class org.wonad.desktop.broker.BrokerNative { *; }
+-keep class org.wonad.desktop.api.** { *; }
+
 -keep class com.android.systemui.SystemUIInitializerImpl {
     *;
 }

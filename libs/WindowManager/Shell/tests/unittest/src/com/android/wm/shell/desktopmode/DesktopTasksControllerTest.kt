@@ -6349,6 +6349,47 @@ class DesktopTasksControllerTest : ShellTestCase() {
 
     @Test
     @EnableFlags(Flags.FLAG_ENABLE_DESKTOP_WINDOWING_BACK_NAVIGATION)
+    fun removeDesk_activeWithRemoveTasksFalse_preservesRunningAndRecentTasks() {
+        val transition = Binder()
+        whenever(transitions.startTransition(eq(TRANSIT_CLOSE), any(), anyOrNull()))
+            .thenReturn(transition)
+        taskRepository.addDesk(displayId = DEFAULT_DISPLAY, deskId = 2)
+        val recent = setUpFreeformTask(deskId = 2, background = true)
+        val running = setUpFreeformTask(deskId = 2, background = false)
+        taskRepository.setActiveDesk(DEFAULT_DISPLAY, deskId = 2)
+
+        controller.removeDesk(deskId = 2, exitReason = ExitReason.TASK_MOVED_FROM_DESK,
+            removeTasks = false)
+
+        verify(desksOrganizer).removeDesk(any(), eq(2), eq(taskRepository.userId))
+        verify(recentTasksController, never()).removeBackgroundTask(recent.taskId)
+        val wct = getLatestWct(TRANSIT_CLOSE)
+        assertThat(wct.hierarchyOps.any { hop ->
+            hop.type == HIERARCHY_OP_TYPE_REMOVE_TASK &&
+                hop.container == running.token.asBinder()
+        }).isFalse()
+    }
+
+    @Test
+    @EnableFlags(Flags.FLAG_ENABLE_DESKTOP_WINDOWING_BACK_NAVIGATION)
+    fun removeDesk_activeWithDefaultRemoval_stillRemovesRunningAndRecentTasks() {
+        val transition = Binder()
+        whenever(transitions.startTransition(eq(TRANSIT_CLOSE), any(), anyOrNull()))
+            .thenReturn(transition)
+        taskRepository.addDesk(displayId = DEFAULT_DISPLAY, deskId = 2)
+        val recent = setUpFreeformTask(deskId = 2, background = true)
+        val running = setUpFreeformTask(deskId = 2, background = false)
+        taskRepository.setActiveDesk(DEFAULT_DISPLAY, deskId = 2)
+
+        controller.removeDesk(deskId = 2, exitReason = ExitReason.UNKNOWN_EXIT)
+
+        verify(desksOrganizer).removeDesk(any(), eq(2), eq(taskRepository.userId))
+        verify(recentTasksController).removeBackgroundTask(recent.taskId)
+        getLatestWct(TRANSIT_CLOSE).assertRemove(running.token)
+    }
+
+    @Test
+    @EnableFlags(Flags.FLAG_ENABLE_DESKTOP_WINDOWING_BACK_NAVIGATION)
     fun removeAllDesks_multipleDesks_removesAllInSingleTransition() {
         val transition = Binder()
         whenever(transitions.startTransition(eq(TRANSIT_CLOSE), any(), anyOrNull()))

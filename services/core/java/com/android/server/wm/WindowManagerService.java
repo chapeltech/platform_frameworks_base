@@ -1781,6 +1781,10 @@ public class WindowManagerService extends IWindowManager.Stub
             // If this is a child window, we want to apply the same type checking rules as the
             // parent window type.
             final int rootType = hasParent ? parentWindow.mAttrs.type : type;
+            // Serialize native takeover with actual root-type admission.
+            if (WonadNativeDecorations.rejects(displayContent, rootType)) {
+                return WindowManagerGlobal.ADD_INVALID_TYPE;
+            }
 
             boolean addToastWindowRequiresToken = false;
 
@@ -1825,6 +1829,8 @@ public class WindowManagerService extends IWindowManager.Stub
                     ProtoLog.w(WM_ERROR, "Attempted to add window with exiting application token "
                             + ".%s Aborting.", token);
                     return WindowManagerGlobal.ADD_APP_EXITING;
+                } else if (WonadNativeWallpapers.rejectsWindow(displayContent, activity)) {
+                    return WindowManagerGlobal.ADD_INVALID_TYPE;
                 } else if (type == TYPE_APPLICATION_STARTING) {
                     if (activity.mStartingWindow != null) {
                         ProtoLog.w(WM_ERROR, "Attempted to add starting window to "
@@ -3708,6 +3714,9 @@ public class WindowManagerService extends IWindowManager.Stub
         synchronized (mGlobalLock) {
             final DisplayContent displayContent = mRoot.getDisplayContent(displayId);
             if (displayContent != null && mRoot.getTopChild() != displayContent) {
+                if (WonadNativeBridge.preventNativeDisplayRaise(this, displayContent)) {
+                    return false;
+                }
                 // Check whether anything prevents us from moving the display to the top.
                 if (!displayContent.canStealTopFocus()) {
                     ProtoLog.i(WM_DEBUG_FOCUS_LIGHT,
@@ -6159,6 +6168,7 @@ public class WindowManagerService extends IWindowManager.Stub
                 return;
             }
             mFocusedInputTarget = newTarget;
+            WonadFocusBridge.onInputFocusChanged(this, newTarget);
 
             mAccessibilityController.onFocusChanged(lastTarget, newTarget);
             ProtoLog.i(WM_DEBUG_FOCUS_LIGHT, "Focus changing: %s -> %s", lastTarget, newTarget);
@@ -8216,7 +8226,8 @@ public class WindowManagerService extends IWindowManager.Stub
                         + "not exist: %d", displayId);
                 return false;
             }
-            return displayContent.isSystemDecorationsSupported();
+            return !WonadUiBridge.owns(displayContent)
+                    && displayContent.isSystemDecorationsSupported();
         }
     }
 
@@ -8311,6 +8322,106 @@ public class WindowManagerService extends IWindowManager.Stub
                 }
             }
         }
+    }
+
+    <T> T withWonadGlobalLock(java.util.function.Supplier<T> action) {
+        synchronized (mGlobalLock) {
+            return action.get();
+        }
+    }
+
+    @Override
+    public int getWonadFocusedDisplayId() {
+        return WonadFocusBridge.focusedDisplay(this);
+    }
+
+    @Override
+    public long[] getWonadNativeDisplayState(int[] displayIds) {
+        return WonadUiBridge.nativeDisplayState(this, displayIds);
+    }
+
+    @Override
+    public long[] getWonadNativeTaskState(int userId, long generation, IBinder owner,
+            IBinder[] taskTokens) {
+        return WonadNativeBridge.taskState(this, userId, generation, owner, taskTokens);
+    }
+
+    @Override
+    public boolean setWonadNativeUiLease(int displayId, int userId, long generation,
+            long expiresElapsedRealtime, IBinder owner) {
+        return WonadUiBridge.setNativeLease(this, displayId, userId, generation,
+                expiresElapsedRealtime, owner);
+    }
+
+    @Override
+    public boolean applyWonadNativeFrame(int userId, long generation, IBinder owner,
+            IBinder[] taskTokens, int[] expectedUids, long[] current, long[] desired) {
+        return WonadNativeBridge.applyFrame(this, userId, generation, owner,
+                taskTokens, expectedUids, current, desired);
+    }
+
+    @Override
+    public boolean applyWonadNativeSignedFrame(int userId, long generation, IBinder owner,
+            IBinder[] taskTokens, int[] expectedUids, long[] current, long[] desired) {
+        return WonadNativeBridge.applySignedFrame(this, userId, generation, owner,
+                taskTokens, expectedUids, current, desired);
+    }
+
+    @Override
+    public boolean isWonadNativeFrameApplied(int userId, long generation, IBinder owner,
+            IBinder[] taskTokens, int[] expectedUids, long[] current, long[] desired) {
+        return WonadNativeBridge.frameApplied(this, userId, generation, owner,
+                taskTokens, expectedUids, current, desired);
+    }
+
+    @Override
+    public boolean operateWonadNativeTask(int userId, long generation, IBinder owner,
+            IBinder taskToken, int expectedUid, boolean close) {
+        return WonadNativeBridge.operateTask(this, userId, generation, owner,
+                taskToken, expectedUid, close);
+    }
+
+    @Override
+    public boolean transferWonadNativeTask(int userId, long generation, IBinder owner,
+            IBinder taskToken, int expectedUid, long destinationDisplayToken) {
+        return WonadNativeBridge.transferTask(this, userId, generation, owner,
+                taskToken, expectedUid, destinationDisplayToken);
+    }
+
+    @Override
+    public boolean isWonadNativeUiDisplay(int displayId) {
+        return WonadNativeBridge.nativeMode(this, displayId);
+    }
+
+    @Override
+    public long getWonadNativeIdentityEpoch() {
+        return WonadNativeBridge.identityEpoch(this);
+    }
+
+    @Override
+    public boolean isWonadNativeInteractionBlocked(int userId) {
+        return WonadNativeBridge.interactionBlocked(this, userId);
+    }
+
+    @Override
+    public boolean setWonadExternalUiLease(int displayId, int userId, long generation,
+            long expiresElapsedRealtime, IBinder owner) {
+        return WonadUiBridge.setLease(this, displayId, userId, generation,
+                expiresElapsedRealtime, owner);
+    }
+
+    @Override
+    public boolean setWonadFocusLease(int displayId, int userId, long generation,
+            long expiresElapsedRealtime, IBinder[] taskTokens, IBinder owner) {
+        return WonadFocusBridge.setLease(this, displayId, userId, generation,
+                expiresElapsedRealtime, taskTokens, owner);
+    }
+
+    @Override
+    public boolean setWonadShortcutLease(int displayId, int userId, long generation,
+            long expiresElapsedRealtime, IShortcutService receiver) {
+        return org.wonad.server.input.WonadInputBridge.setLease(mContext, displayId, userId,
+                generation, expiresElapsedRealtime, receiver);
     }
 
     @Override

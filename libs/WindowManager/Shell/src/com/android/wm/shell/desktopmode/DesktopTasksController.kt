@@ -868,12 +868,17 @@ class DesktopTasksController(
         destinationDisplayId: Int,
         transition: IBinder,
     ): WindowContainerTransaction {
+        val targetDisplayId = org.wonad.desktop.broker.WonadController.instance
+            ?.disconnectDestination(disconnectedDisplayId, destinationDisplayId)
+            ?: destinationDisplayId
         val wct = WindowContainerTransaction()
-        addOnDisplayDisconnectChanges(wct, disconnectedDisplayId, destinationDisplayId)
+        addOnDisplayDisconnectChanges(wct, disconnectedDisplayId, targetDisplayId)
             .invoke(transition)
+        org.wonad.desktop.broker.WonadController.instance
+            ?.finishDisplayDisconnect(disconnectedDisplayId, targetDisplayId, wct, transition)
         // Ensure focus state does not get stuck disconnected display. Only update focus state after
         // wct has been correctly updated
-        focusTransitionObserver.onDisplayDisconnected(disconnectedDisplayId, destinationDisplayId)
+        focusTransitionObserver.onDisplayDisconnected(disconnectedDisplayId, targetDisplayId)
         try {
             userRepositories.current.getExpandedTasksOrdered(disconnectedDisplayId).forEach {
                 logD("addOnDisplayDisconnect: taking a snapshot of=%d before disconnect", it)
@@ -898,6 +903,8 @@ class DesktopTasksController(
         )
         val runOnTransitStartList = mutableListOf<RunOnTransitStart>()
         preserveDisplayRequestHandler?.requestPreserveDisplay(disconnectedDisplayId)
+        org.wonad.desktop.broker.WonadController.instance
+            ?.prepareDisplayDisconnect(disconnectedDisplayId, wct)
         // TODO: b/406320371 - Verify this works with non-system users once the underlying bug is
         //  resolved.
         // TODO: b/391652399 - Investigate why sometimes disconnect results in a black background.
@@ -1191,6 +1198,19 @@ class DesktopTasksController(
             val repository = userRepositories.getProfile(userId)
             val preservedTaskIdsByDeskId =
                 repository.getPreservedTasksByDeskIdInZOrder(preservedDisplay)
+                    .mapValues { (_, taskIds) -> taskIds.filterNot { taskId ->
+                        // A live Wonad workspace, not historical display membership,
+                        // owns these exact surviving tasks. Leave native fallback alone.
+                        org.wonad.desktop.broker.WonadController.instance
+                            ?.retainsTaskForReconnect(taskId, userId) == true
+                    } }
+                    .filterValues { it.isNotEmpty() }
+            // Ownership may have changed since the display-event callback.
+            // Even when all tasks are now retained, this display needs a desk.
+            if (preservedTaskIdsByDeskId.isEmpty()) {
+                createDeskSuspending(displayId, userId, enforceDeskLimit = false)
+                return@launch
+            }
             val boundsByTaskId = repository.getPreservedTaskBounds(preservedDisplay)
             val activeDeskId = preservedDisplay.activeDeskId
             val wct = WindowContainerTransaction()
@@ -1243,7 +1263,11 @@ class DesktopTasksController(
                 val pipTask = pipTransitionState.getOrNull()?.pipTaskInfo
                 val defaultDisplayActiveDesk = repository.getActiveDeskId(DEFAULT_DISPLAY)
                 preservedTaskIds.asReversed().forEach { taskId ->
-                    if (!excludedTasks.contains(taskId)) {
+                    // createDeskSuspending yields: revalidate ownership immediately
+                    // before restoring, not just before creating the target root.
+                    if (!excludedTasks.contains(taskId) &&
+                        org.wonad.desktop.broker.WonadController.instance
+                            ?.retainsTaskForReconnect(taskId, userId) != true) {
                         if (taskId == pipTask?.taskId) {
                             mPipScheduler.scheduleExitPipViaExpand(
                                 /* wasVisible= */ true,
@@ -3750,6 +3774,7 @@ class DesktopTasksController(
         skipWallpaperAndHomeOrdering: Boolean = false,
         skipUpdatingExitDesktopListener: Boolean = false,
         exitReason: ExitReason,
+        removeTasks: Boolean = true,
     ): RunOnTransitStart? {
         logV(
             "performDesktopExitCleanUp deskId=%d displayId=%d userId=%d willExitDesktop=%b " +
@@ -3803,6 +3828,7 @@ class DesktopTasksController(
                 userId = userId,
                 excludingTaskId = removingLastTaskId,
                 exitReason = exitReason,
+                removeTasks = removeTasks,
             )
         } else {
             addDeskDeactivationChanges(
@@ -3844,6 +3870,10 @@ class DesktopTasksController(
         // Skipping early if the trigger task is null
         if (triggerTask == null) {
             logV("skipping handleRequest reason=triggerTask is null")
+            return null
+        }
+        if (!org.wonad.desktop.broker.WonadNativeUi.allowStockPolicy(triggerTask.displayId)) {
+            logV("skipping stock desktop policy: native Wonad attachment")
             return null
         }
         val windowingLayerChange = request.windowingLayerChange
@@ -6043,6 +6073,7 @@ class DesktopTasksController(
                     shouldEndUpAtHome = shouldEndUpAtHome,
                     skipWallpaperAndHomeOrdering = skipWallpaperAndHomeOrdering,
                     exitReason = exitReason,
+                    removeTasks = removeTasks,
                 )
             } else {
                 addDeskRemovalChanges(
@@ -6777,6 +6808,7 @@ class DesktopTasksController(
 
     /** Called when a task's info changes. */
     fun onTaskInfoChanged(taskInfo: RunningTaskInfo) {
+        if (!org.wonad.desktop.broker.WonadNativeUi.allowStockPolicy(taskInfo.displayId)) return
         val repository = userRepositories.getProfile(taskInfo.userId)
         val inImmersive = repository.isTaskInFullImmersiveState(taskInfo.taskId)
         val requestingImmersive = taskInfo.requestingImmersive
@@ -7047,6 +7079,42 @@ class DesktopTasksController(
             executeRemoteCallWithTaskPermission(controller, "moveTaskToExternalDisplay") { c ->
                 c.moveToNextDisplay(taskId, enterReason = transitionSource.getEnterReason())
             }
+        }
+
+        override fun canSendTaskToWonad(
+            taskId: Int,
+            userId: Int,
+            lastActiveTime: Long,
+            baseActivity: ComponentName?,
+            taskToken: IBinder?,
+        ): Boolean {
+            val caller = Binder.getCallingUid()
+            var allowed = false
+            executeRemoteCallWithTaskPermission(controller, "canSendTaskToWonad", { _ ->
+                val wonad = org.wonad.desktop.broker.WonadController.instance
+                allowed = wonad != null && wonad.trustedRecentsCaller(caller) &&
+                    wonad.canTransferFromRecents(taskId, userId, lastActiveTime, baseActivity,
+                        taskToken)
+            }, true /* blocking */)
+            return allowed
+        }
+
+        override fun sendTaskToWonad(
+            taskId: Int,
+            userId: Int,
+            lastActiveTime: Long,
+            baseActivity: ComponentName?,
+            taskToken: IBinder?,
+        ): Boolean {
+            val caller = Binder.getCallingUid()
+            var moved = false
+            executeRemoteCallWithTaskPermission(controller, "sendTaskToWonad", { _ ->
+                val wonad = org.wonad.desktop.broker.WonadController.instance
+                moved = wonad != null && wonad.trustedRecentsCaller(caller) &&
+                    wonad.transferFromRecents(taskId, userId, lastActiveTime, baseActivity,
+                        taskToken)
+            }, true /* blocking */)
+            return moved
         }
 
         override fun startLaunchIntentTransition(

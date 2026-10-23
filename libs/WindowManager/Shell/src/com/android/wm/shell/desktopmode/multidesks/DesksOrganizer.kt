@@ -20,6 +20,7 @@ import android.app.ActivityOptions
 import android.app.TaskInfo
 import android.window.TransitionInfo
 import android.window.WindowContainerTransaction
+import android.window.WindowContainerToken
 
 /** An organizer of desk containers in which to host child desktop windows. */
 interface DesksOrganizer {
@@ -100,6 +101,9 @@ interface DesksOrganizer {
 
     /** Whether the task is in the given desk. */
     fun isTaskInDesk(taskId: Int, deskId: Int): Boolean
+
+    /** Trusted Shell bookkeeping only. Empty when both native roots are not known. */
+    fun getDeskRootTaskTokens(deskId: Int): List<WindowContainerToken> = emptyList()
 
     /** Allows for other classes to respond to task changes this organizer receives. */
     fun addOnDesktopTaskInfoChangedListener(listener: (ActivityManager.RunningTaskInfo) -> Unit)

@@ -164,6 +164,12 @@ constructor(
 
     /** Starts status bar orchestration. To be called when status bar is created. */
     fun start() {
+        if (!org.wonad.desktop.broker.WonadNativeUi.allowStockDecorations(displayId)) {
+            stop()
+            statusBarWindowController.stop()
+            return
+        }
+        if (startJob?.isActive == true) return
         startJob =
             coroutineScope
                 // Perform animations on the main thread to prevent crashes.
@@ -190,6 +196,11 @@ constructor(
                     launch { autoHideUpdate.collect { autoHideController.touchAutoHide() } }
                 }
         createAndAddWindow()
+        if (!org.wonad.desktop.broker.WonadNativeUi.allowStockDecorations(displayId)) {
+            stop()
+            statusBarWindowController.stop()
+            return
+        }
         setupPluginDependencies()
         setUpAutoHide()
         statusBarIconRefreshInteractor.start()

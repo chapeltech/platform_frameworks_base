@@ -23,6 +23,7 @@
     coreApp="true">
 
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.HIDE_OVERLAY_WINDOWS" />
 
     <!-- Used to read wallpaper -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
@@ -457,6 +458,15 @@
              up everything else.
              TODO: Should have an android:permission attribute
              -->
+        <!-- Each Binder call authenticates the separate Wonad APK's UID and pinned signer. -->
+        <service android:name="org.wonad.desktop.broker.WonadBrokerService"
+            android:exported="true" android:singleUser="true">
+            <intent-filter><action android:name="org.wonad.desktop.BIND" /></intent-filter>
+        </service>
+        <activity android:name="org.wonad.desktop.broker.WonadSettingsActivity"
+            android:exported="true" android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar"
+            android:label="Wonad external desktop" />
         <service android:name="SystemUIService"
             android:exported="true"
         />

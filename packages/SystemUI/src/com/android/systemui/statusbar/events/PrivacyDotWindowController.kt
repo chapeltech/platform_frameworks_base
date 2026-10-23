@@ -59,12 +59,21 @@ constructor(
 ) {
     private val dotWindowViewsByCorner = mutableMapOf<PrivacyDotCorner, View>()
     private var displayRotationOnStartup = 0
+    private var started = false
+    private var lifecycle = Any()
 
     fun start() {
         uiExecutor.execute { startOnUiThread() }
     }
 
     private fun startOnUiThread() {
+        if (!org.wonad.desktop.broker.WonadNativeUi.allowStockDecorations(displayId)) {
+            stopOnUiThread()
+            return
+        }
+        if (started) return
+        started = true
+        val scope = Any().also { lifecycle = it }
         displayRotationOnStartup = inflater.context.display.rotation
 
         val providers = dotFactory.providers
@@ -86,6 +95,8 @@ constructor(
             object : PrivacyDotViewController.ShowingListener {
 
                 override fun onPrivacyDotShown(v: View?) {
+                    if (!started || lifecycle !== scope ||
+                        !org.wonad.desktop.broker.WonadNativeUi.allowStockDecorations(displayId)) return
                     val dotViewContainer = dotViewContainersByView[v]
                     if (v == null || dotViewContainer == null) {
                         return
@@ -93,11 +104,13 @@ constructor(
                     if (dotWindowViewsByCorner.containsKey(dotViewContainer.corner)) {
                         return
                     }
-                    v.addToWindow(dotViewContainer.corner)
-                    dotWindowViewsByCorner[dotViewContainer.corner] = dotViewContainer.windowView
+                    if (v.addToWindow(dotViewContainer.corner)) {
+                        dotWindowViewsByCorner[dotViewContainer.corner] = dotViewContainer.windowView
+                    }
                 }
 
                 override fun onPrivacyDotHidden(v: View?) {
+                    if (!started || lifecycle !== scope) return
                     val dotViewContainer = dotViewContainersByView[v]
                     val corner = dotViewContainer?.corner ?: return
                     val windowView = dotWindowViewsByCorner.remove(corner) ?: return
@@ -123,7 +136,8 @@ constructor(
         return DotViewContainer(windowView, dotView, corner)
     }
 
-    private fun View.addToWindow(corner: PrivacyDotCorner) {
+    private fun View.addToWindow(corner: PrivacyDotCorner): Boolean {
+        if (!org.wonad.desktop.broker.WonadNativeUi.allowStockDecorations(displayId)) return false
         val excludeFromScreenshots = displayId == Display.DEFAULT_DISPLAY
         val params =
             ScreenDecorations.getWindowLayoutBaseParams(excludeFromScreenshots).apply {
@@ -144,15 +158,21 @@ constructor(
                 "Unable to add view to WM. Display with id $displayId does not exist anymore",
                 e,
             )
+            return false
         }
-        return
+        return true
     }
 
     fun stop() {
-        uiExecutor.execute {
-            privacyDotViewController.showingListener = null
-            dotWindowViewsByCorner.forEach { windowManager.removeViewSafely(it.value, it.key) }
-        }
+        uiExecutor.execute { stopOnUiThread() }
+    }
+
+    private fun stopOnUiThread() {
+        started = false
+        lifecycle = Any()
+        privacyDotViewController.showingListener = null
+        dotWindowViewsByCorner.forEach { windowManager.removeViewSafely(it.value, it.key) }
+        dotWindowViewsByCorner.clear()
     }
 
     private data class DotViewContainer(

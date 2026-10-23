@@ -1098,6 +1098,8 @@ android_app {
         "SystemUI-application",
     ],
     resource_dirs: [],
+    jni_libs: ["libwonad_broker_jni"],
+    use_embedded_native_libs: false,
     enable_ksp: true,
 
     use_resource_processor: true,
