@@ -410,6 +410,10 @@ public class NavigationBarControllerImpl implements
         }
 
         final int displayId = display.getDisplayId();
+        if (!org.wonad.desktop.broker.WonadNativeUi.allowStockDecorations(displayId)) {
+            removeNavigationBar(displayId);
+            return;
+        }
         final boolean isOnDefaultDisplay = displayId == mDisplayTracker.getDefaultDisplayId();
 
         if (!canCreateNavBarOrTaskBar(displayId)) {
@@ -437,6 +441,11 @@ public class NavigationBarControllerImpl implements
                 context, savedState);
         NavigationBar navBar = component.getNavigationBar();
         navBar.init();
+        if (!navBar.isWindowAdded()) return;
+        if (!org.wonad.desktop.broker.WonadNativeUi.allowStockDecorations(displayId)) {
+            navBar.destroyView();
+            return;
+        }
         mNavigationBars.put(displayId, navBar);
 
         navBar.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {

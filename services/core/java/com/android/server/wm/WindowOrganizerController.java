@@ -252,6 +252,10 @@ class WindowOrganizerController extends IWindowOrganizerController.Stub
         final long ident = Binder.clearCallingIdentity();
         try {
             synchronized (mGlobalLock) {
+                if (t != null) {
+                    sanitizeTransaction(t);
+                    enforceNativeWallpaperTransaction(t, caller);
+                }
                 final ActionChain chain = mService.mChainTracker.startLegacy("applyTransactLegacy");
                 applyTransaction(t, -1 /*syncId*/, chain, caller);
                 mService.mChainTracker.end();
@@ -272,6 +276,10 @@ class WindowOrganizerController extends IWindowOrganizerController.Stub
         final long ident = Binder.clearCallingIdentity();
         try {
             synchronized (mGlobalLock) {
+                if (t != null) {
+                    sanitizeTransaction(t);
+                    enforceNativeWallpaperTransaction(t, caller);
+                }
                 if (callback == null) {
                     final ActionChain chain = mService.mChainTracker.startLegacy("applySyncLegacy");
                     applyTransaction(t, -1 /* syncId*/, chain, caller);
@@ -345,6 +353,10 @@ class WindowOrganizerController extends IWindowOrganizerController.Stub
         final long ident = Binder.clearCallingIdentity();
         try {
             synchronized (mGlobalLock) {
+                if (t != null) {
+                    sanitizeTransaction(t);
+                    enforceNativeWallpaperTransaction(t, caller);
+                }
                 Transition transition = Transition.fromBinder(transitionToken);
                 if (transition == null && transitionToken != null) {
                     Slog.wtf(TAG, "Requested transition was lost (controller isn't tracking it): "
@@ -518,6 +530,10 @@ class WindowOrganizerController extends IWindowOrganizerController.Stub
         final long ident = Binder.clearCallingIdentity();
         try {
             synchronized (mGlobalLock) {
+                if (t != null) {
+                    sanitizeTransaction(t);
+                    enforceNativeWallpaperTransaction(t, caller);
+                }
                 final Transition transition = Transition.fromBinder(transitionToken);
                 final ActionChain chain =
                         mService.mChainTracker.startFinish("finishTransit", transition);
@@ -566,6 +582,8 @@ class WindowOrganizerController extends IWindowOrganizerController.Stub
         final CallerInfo caller = new CallerInfo();
         final long ident = Binder.clearCallingIdentity();
         try {
+            sanitizeTransaction(wct);
+            enforceNativeWallpaperTransaction(wct, caller);
             if (!mTransitionController.isShellTransitionsEnabled()) {
                 // No need to worry about transition when Shell transition is not enabled.
                 applyTransaction(wct, -1 /* syncId */,
@@ -705,6 +723,7 @@ class WindowOrganizerController extends IWindowOrganizerController.Stub
         int effects = TRANSACT_EFFECTS_NONE;
         ProtoLog.v(WM_DEBUG_WINDOW_ORGANIZER, "Apply window transaction, syncId=%d", syncId);
         sanitizeTransaction(t);
+        enforceNativeWallpaperTransaction(t, caller);
         mService.deferWindowLayout();
         mService.mTaskSupervisor.beginDeferResume();
         boolean deferResume = true;
@@ -874,6 +893,121 @@ class WindowOrganizerController extends IWindowOrganizerController.Stub
             mService.continueWindowLayout();
         }
         return effects;
+    }
+
+    /** Called after stock permission sanitization, before ANY native mutation.
+     * Stock hierarchy lookup only: no task restore, launch, creation, or IPC.
+     */
+    private void enforceNativeWallpaperTransaction(WindowContainerTransaction t, CallerInfo caller) {
+        final WonadNativeWallpaperRoutes.Transaction routes =
+                new WonadNativeWallpaperRoutes.Transaction();
+        final List<WindowContainerTransaction.HierarchyOp> hops = t.getHierarchyOps();
+        final boolean simpleBulk = hops.size() == 1 && t.getChanges().isEmpty();
+
+        final java.util.IdentityHashMap<IBinder, Task> futureFragments =
+                new java.util.IdentityHashMap<>();
+        for (WindowContainerTransaction.HierarchyOp hop : hops) {
+            final TaskFragmentOperation operation = hop.getTaskFragmentOperation();
+            if (hop.getType() != HIERARCHY_OP_TYPE_ADD_TASK_FRAGMENT_OPERATION || operation == null
+                    || operation.getOpType() != OP_TYPE_CREATE_TASK_FRAGMENT) continue;
+            final TaskFragmentCreationParams params = operation.getTaskFragmentCreationParams();
+            if (params == null) continue;
+            final ActivityRecord owner = ActivityRecord.forTokenLocked(params.getOwnerToken());
+            if (owner != null && owner.getTask() != null)
+                futureFragments.put(params.getFragmentToken(), owner.getTask());
+        }
+
+        for (WindowContainerTransaction.HierarchyOp hop : hops) {
+            if (hop.isReparent()) {
+                final WindowContainer source = WindowContainer.fromBinder(hop.getContainer());
+                if (source == null || !source.isAttached()) continue;
+                final WindowContainer parent = hop.getNewParent() == null
+                        ? source.getDisplayContent().getDefaultTaskDisplayArea()
+                        : WindowContainer.fromBinder(hop.getNewParent());
+                routes.add(source, parent);
+            } else if (hop.getType() == HIERARCHY_OP_TYPE_LAUNCH_TASK) {
+                final Bundle options = hop.getLaunchOptions();
+                if (options == null) continue;
+                final int id = options.getInt(
+                        WindowContainerTransaction.HierarchyOp.LAUNCH_KEY_TASK_ID);
+                final Task task = mService.mRootWindowContainer.anyTaskForId(id,
+                        RootWindowContainer.MATCH_ATTACHED_TASK_OR_RECENT_TASKS);
+                if (task != null) WonadNativeWallpaperLaunches.addRecent(routes,
+                        mService.mTaskSupervisor, task,
+                        ActivityOptions.fromBundle(new Bundle(options)), caller.mPid, caller.mUid);
+            } else if (hop.getType() == HIERARCHY_OP_TYPE_ADD_TASK_FRAGMENT_OPERATION) {
+                final TaskFragmentOperation operation = hop.getTaskFragmentOperation();
+                if (operation == null) continue;
+                final WindowContainer parent = mLaunchTaskFragments.containsKey(hop.getContainer())
+                        ? mLaunchTaskFragments.get(hop.getContainer())
+                        : futureFragments.get(hop.getContainer());
+                if (operation.getOpType() == OP_TYPE_START_ACTIVITY_IN_TASK_FRAGMENT) {
+                    if (parent != null && operation.getActivityIntent() != null) {
+                        WonadNativeWallpaperLaunches.addFragment(routes,
+                                mService.mTaskSupervisor, parent, operation.getActivityIntent(),
+                                ActivityOptions.fromBundle(operation.getBundle()),
+                                ActivityRecord.forTokenLocked(operation.getActivityToken()),
+                                caller.mUid, caller.mPid);
+                    }
+                    continue;
+                }
+                if (operation.getOpType() != OP_TYPE_REPARENT_ACTIVITY_TO_TASK_FRAGMENT) continue;
+                ActivityRecord activity = ActivityRecord.forTokenLocked(operation.getActivityToken());
+                if (activity == null) {
+                    activity = mTaskFragmentOrganizerController.peekReparentActivityFromTemporaryToken(
+                            t.getTaskFragmentOrganizer(), operation.getActivityToken());
+                }
+                routes.add(activity, parent);
+            }
+        }
+
+        // Fixed point handles selected tasks arriving from prior/later bulk or
+        // ancestor moves. Compound configurations can change actual selection
+        // or multiwindow support, so do NOT trust today's filtered top task.
+        // Conservative candidates only affect exact Wallpaper/native routes.
+        for (int pass = 0; pass <= hops.size(); pass++) {
+            for (WindowContainerTransaction.HierarchyOp hop : hops) {
+                if (hop.getType() != HIERARCHY_OP_TYPE_CHILDREN_TASKS_REPARENT) continue;
+                WindowContainer<?> current = WindowContainer.fromBinder(hop.getContainer());
+                WindowContainer<?> target = WindowContainer.fromBinder(hop.getNewParent());
+                if (current == null && target == null) continue;
+                if (current == null && target.asTask() != null) {
+                    current = target.getDisplayContent().getDefaultTaskDisplayArea();
+                } else if (target == null && current.asTask() != null) {
+                    target = current.getDisplayContent().getDefaultTaskDisplayArea();
+                }
+                if (current == null || target == null || current == target
+                        || !current.isAttached() || !target.isAttached()) continue;
+                final WindowContainer<?> source = current;
+                final WindowContainer<?> destination = target;
+                if (simpleBulk) {
+                    if (target.inPinnedWindowingMode()) continue;
+                    final boolean multiWindow = target.inMultiWindowMode();
+                    final TaskDisplayArea area = target.asTask() != null
+                            ? target.asTask().getDisplayArea() : target.asTaskDisplayArea();
+                    source.forAllTasks(task -> {
+                        if (task.mCreatedByOrganizer || task.getParent() != source) return false;
+                        if (multiWindow && !task.supportsMultiWindowInDisplayArea(area)) return false;
+                        if (!ArrayUtils.isEmpty(hop.getActivityTypes()) && !ArrayUtils.contains(
+                                hop.getActivityTypes(), task.getActivityType())) return false;
+                        if (!ArrayUtils.isEmpty(hop.getWindowingModes()) && !ArrayUtils.contains(
+                                hop.getWindowingModes(), task.getRequestedOverrideWindowingMode()))
+                            return false;
+                        if (isLockTaskModeViolation(destination, task, mService.isInLockTaskMode()))
+                            return false;
+                        routes.add(task, destination);
+                        return hop.getReparentTopOnly();
+                    });
+                } else {
+                    mService.mRootWindowContainer.forAllTasks((java.util.function.Consumer<Task>) task -> {
+                        if (!task.mCreatedByOrganizer && task != source &&
+                                routes.mayBeUnder(task, source))
+                            routes.add(task, destination);
+                    });
+                }
+            }
+        }
+        routes.enforce();
     }
 
     private int applyChanges(@NonNull WindowContainer<?> container,

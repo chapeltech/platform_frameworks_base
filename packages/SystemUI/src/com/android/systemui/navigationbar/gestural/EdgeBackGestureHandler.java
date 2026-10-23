@@ -684,6 +684,10 @@ public class EdgeBackGestureHandler {
                     Log.w(TAG, "onDisplayAddSystemDecorations called for main display");
                     return;
                 }
+                if (!org.wonad.desktop.broker.WonadNativeUi.allowStockGestures(displayId)) {
+                    removeAndDisposeDisplayResource(displayId);
+                    return;
+                }
                 Display display = mDisplayManager.getDisplay(displayId);
                 if (display == null) {
                     Log.w(TAG, "onDisplayAddSystemDecorations: can't find display with id="
@@ -698,8 +702,11 @@ public class EdgeBackGestureHandler {
                 }
                 removeAndDisposeDisplayResource(displayId);
                 try {
-                    mDisplayBackGestureHandlers.put(
-                            displayId, createDisplayBackGestureHandler(display));
+                    DisplayBackGestureHandler handler = org.wonad.desktop.broker.WonadNativeUi
+                            .createStockGestureHandler(displayId,
+                                    () -> createDisplayBackGestureHandler(display),
+                                    DisplayBackGestureHandler::dispose);
+                    if (handler != null) mDisplayBackGestureHandlers.put(displayId, handler);
                 } catch (IllegalArgumentException e) {
                     // This can happen when a display is instantly removed after being added. Note
                     // that `isDesktopModeSupportedOnDisplay` above just returns `false` if the
@@ -822,8 +829,16 @@ public class EdgeBackGestureHandler {
 
                 // Registers input event receiver and adds a nav bar panel window
                 for (Display display : mDisplayManager.getDisplays()) {
-                    mDisplayBackGestureHandlers.put(display.getDisplayId(),
-                            createDisplayBackGestureHandler(display));
+                    if (!org.wonad.desktop.broker.WonadNativeUi.allowStockGestures(
+                            display.getDisplayId())) continue;
+
+                    DisplayBackGestureHandler handler = org.wonad.desktop.broker.WonadNativeUi
+                            .createStockGestureHandler(display.getDisplayId(),
+                                    () -> createDisplayBackGestureHandler(display),
+                                    DisplayBackGestureHandler::dispose);
+                    if (handler != null) {
+                        mDisplayBackGestureHandlers.put(display.getDisplayId(), handler);
+                    }
                 }
 
                 // Begin listening to changes in blocked activities list

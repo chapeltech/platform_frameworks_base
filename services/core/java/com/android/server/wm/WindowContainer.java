@@ -622,6 +622,8 @@ class WindowContainer<E extends WindowContainer> extends ConfigurationContainer<
             throw new IllegalArgumentException("WC=" + this + " already child of " + mParent);
         }
 
+        WonadNativeWallpaperRoutes.enforceReparent(this, newParent);
+
         // Collect before removing child from old parent, because the old parent may be removed if
         // this is the last child in it.
         mTransitionController.collectReparentChange(this, newParent);
@@ -650,6 +652,7 @@ class WindowContainer<E extends WindowContainer> extends ConfigurationContainer<
     }
 
     final protected void setParent(WindowContainer<WindowContainer> parent) {
+        WonadNativeWallpaperRoutes.enforceReparent(this, parent);
         final WindowContainer oldParent = mParent;
         mParent = parent;
 
@@ -783,6 +786,7 @@ class WindowContainer<E extends WindowContainer> extends ConfigurationContainer<
      */
     @CallSuper
     protected void addChild(E child, Comparator<E> comparator) {
+        WonadNativeWallpaperRoutes.enforceReparent(child, this);
         if (!child.mReparenting && child.getParent() != null) {
             throw new IllegalArgumentException("addChild: container=" + child.getName()
                     + " is already a child of container=" + child.getParent().getName()
@@ -813,6 +817,7 @@ class WindowContainer<E extends WindowContainer> extends ConfigurationContainer<
     /** Adds the input window container has a child of this container at the input index. */
     @CallSuper
     void addChild(E child, int index) {
+        WonadNativeWallpaperRoutes.enforceReparent(child, this);
         if (!child.mReparenting && child.getParent() != null) {
             throw new IllegalArgumentException("addChild: container=" + child.getName()
                     + " is already a child of container=" + child.getParent().getName()

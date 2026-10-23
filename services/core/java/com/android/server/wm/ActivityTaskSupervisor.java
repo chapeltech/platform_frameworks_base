@@ -2039,6 +2039,8 @@ public class ActivityTaskSupervisor implements RecentTasks.Callbacks {
      * @return true if the task has been restored successfully.
      */
     boolean restoreRecentTaskLocked(Task task, ActivityOptions aOptions, boolean onTop) {
+        WonadNativeWallpaperLaunches.enforceRecent(this, task, aOptions,
+                -1, task.mCallingUid);
         final Task rootTask =
                 mRootWindowContainer.getOrCreateRootTask(null, aOptions, task, onTop);
         final WindowContainer parent = task.getParent();
@@ -2959,6 +2961,10 @@ public class ActivityTaskSupervisor implements RecentTasks.Callbacks {
                 : null;
         boolean inChain;
         synchronized (mService.mGlobalLock) {
+            final Task nativeWallpaperCandidate = mRootWindowContainer.anyTaskForId(taskId,
+                    MATCH_ATTACHED_TASK_OR_RECENT_TASKS);
+            if (nativeWallpaperCandidate != null) WonadNativeWallpaperLaunches.enforceRecent(
+                    this, nativeWallpaperCandidate, activityOptions, callingPid, callingUid);
             final boolean isCallerRecents = mRecentTasks.isCallerRecents(callingUid);
             boolean moveHomeTaskForward = isCallerRecents;
             int activityType = ACTIVITY_TYPE_UNDEFINED;

@@ -232,6 +232,7 @@ public class NavigationBar extends ViewController<NavigationBarView> implements 
     private final int mNavColorSampleMargin;
     private EdgeBackGestureHandler mEdgeBackGestureHandler;
     private NavigationBarFrame mFrame;
+    private boolean mWindowAdded;
     private MotionEvent mCurrentDownEvent;
 
     private @WindowVisibleState int mNavigationBarWindowState = WINDOW_STATE_SHOWING;
@@ -699,6 +700,10 @@ public class NavigationBar extends ViewController<NavigationBarView> implements 
 
     @Override
     public void onInit() {
+        if (!org.wonad.desktop.broker.WonadNativeUi.allowStockDecorations(mContext.getDisplayId())) {
+            mNavigationModeController.removeListener(mModeChangedListener);
+            return;
+        }
         // TODO: A great deal of this code should probably live in onViewAttached.
         // It should also has corresponding cleanup in onViewDetached.
         mView.setBarTransitions(mNavigationBarTransitions);
@@ -733,7 +738,14 @@ public class NavigationBar extends ViewController<NavigationBarView> implements 
                             + mDisplayId
                             + " does not exist anymore",
                     e);
+            // No callbacks below this point have been registered yet.
+            mNavigationModeController.removeListener(mModeChangedListener);
+            mEdgeBackGestureHandler.setStateChangeCallback(null);
+            mEdgeBackGestureHandler.setButtonForcedVisibleChangeCallback(null);
+            mNavigationBarTransitions.destroy();
+            return;
         }
+        mWindowAdded = true;
         mDisplayId = mContext.getDisplayId();
         mIsOnDefaultDisplay = mDisplayId == mDisplayTracker.getDefaultDisplayId();
 
@@ -767,7 +779,12 @@ public class NavigationBar extends ViewController<NavigationBarView> implements 
         mTaskStackChangeListeners.registerTaskStackListener(mTaskStackListener);
     }
 
+    public boolean isWindowAdded() {
+        return mWindowAdded;
+    }
+
     public void destroyView() {
+        mWindowAdded = false;
         Trace.beginSection("NavigationBar#destroyView");
         try {
             setAutoHideController(/* autoHideController */ null);
