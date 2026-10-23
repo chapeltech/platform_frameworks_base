@@ -162,16 +162,23 @@ object DisplayLibModule {
     @SysUISingleton
     @DisplayLib
     fun providesDisplaysWithDecorationsRepositoryFromLib(
-        displayLibComponent: DisplayLibComponent
+        displayLibComponent: DisplayLibComponent,
+        @Background bgApplicationScope: CoroutineScope,
     ): DisplaysWithDecorationsRepository {
-        return displayLibComponent.displaysWithDecorationsRepository
+        return com.android.systemui.display.data.repository.WonadDecorationsRepository(
+            displayLibComponent.displaysWithDecorationsRepository,
+            displayLibComponent.displayRepository,
+            bgApplicationScope,
+        )
     }
 
     @Provides
     @SysUISingleton
     fun providesDisplaysWithDecorationsRepositoryCompatFromLib(
-        displayLibComponent: DisplayLibComponent
+        @DisplayLib repository: DisplaysWithDecorationsRepository,
+        @Background bgApplicationScope: CoroutineScope,
     ): DisplaysWithDecorationsRepositoryCompat {
-        return displayLibComponent.displaysWithDecorationsRepositoryCompat
+        // Navbar/Taskbar listeners must consume the SAME guarded repository.
+        return DisplaysWithDecorationsRepositoryCompat(bgApplicationScope, repository)
     }
 }

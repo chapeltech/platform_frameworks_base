@@ -65,6 +65,9 @@ class FreeformFallbackTransitionObserver(
         val pendingMoveToDeskTasks: MutableList<TaskInfo> = mutableListOf()
         for (change in potentialOrphanFreeformChanges) {
             val taskInfo = change.taskInfo ?: continue
+            // Native Wonad deliberately has no stock desk. Sticky ownership
+            // includes parked screens; absence from the repository is not an orphan.
+            if (!org.wonad.desktop.broker.WonadNativeUi.allowStockPolicy(taskInfo.displayId)) continue
             val repository = desktopUserRepositories.getProfile(taskInfo.userId)
             // Ignore change if task is pinned or associated with a desk already.
             if (
@@ -91,6 +94,7 @@ class FreeformFallbackTransitionObserver(
                 val runAllOnTransitStart: MutableSet<RunOnTransitStart> = mutableSetOf()
                 val pendingDeskActivations: MutableSet<Int> = mutableSetOf()
                 for (task in pendingMoveToDeskTasks) {
+                    if (!org.wonad.desktop.broker.WonadNativeUi.allowStockPolicy(task.displayId)) continue
                     val repository = desktopUserRepositories.getProfile(task.userId)
                     // Create desk if one does not exit for display.
                     val targetDeskId: Int? =
@@ -111,6 +115,9 @@ class FreeformFallbackTransitionObserver(
                         continue
                     }
 
+                    // createDeskSuspending may yield while the monitor is claimed.
+                    // Recheck before adding any task/desk/density mutation.
+                    if (!org.wonad.desktop.broker.WonadNativeUi.allowStockPolicy(task.displayId)) continue
                     if (
                         !repository.isDeskActive(targetDeskId) &&
                             !pendingDeskActivations.contains(targetDeskId)
@@ -140,6 +147,9 @@ class FreeformFallbackTransitionObserver(
                     }
                 }
                 if (wct.isEmpty) return@launch
+                // A later task may have suspended after an earlier task was queued.
+                // Never submit that stale transaction against a newly owned plane.
+                if (pendingMoveToDeskTasks.any { !org.wonad.desktop.broker.WonadNativeUi.allowStockPolicy(it.displayId) }) return@launch
                 val transition =
                     transitions.startTransition(
                         TRANSIT_CHANGE,

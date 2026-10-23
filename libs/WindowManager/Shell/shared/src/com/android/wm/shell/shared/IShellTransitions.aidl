@@ -16,6 +16,7 @@
 
 package com.android.wm.shell.shared;
 
+import android.os.RemoteCallback;
 import android.view.SurfaceControl;
 import android.window.RemoteTransition;
 import android.window.TransitionFilter;
@@ -86,4 +87,7 @@ interface IShellTransitions {
      */
      oneway void unregisterOverviewOverlayLeashInvalidationCallback(
             int displayId, in IOverviewOverlayLeashInvalidationCallback callback) = 10;
+
+    /** Private bounded authoritative focus request; no public APK SDK authority. */
+    oneway void requestFocusedDisplay(long requestToken, in RemoteCallback callback) = 11;
 }

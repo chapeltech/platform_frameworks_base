@@ -141,6 +141,7 @@ java_library_static {
         "ondeviceintelligence_conditionally",
     ],
     srcs: [
+        ":wonad-input-kotlin",
         ":android.hardware.audio.effect-V1-java-source",
         ":android.hardware.tv.hdmi.connection-V1-java-source",
         ":android.hardware.tv.hdmi.earc-V1-java-source",
@@ -180,6 +181,7 @@ java_library_static {
         "error_prone_annotations",
         "framework-tethering.stubs.module_lib",
         "keepanno-annotations",
+        "kotlin-annotations",
         "monet",
         "power_hint_flags_lib",
         "service-art.stubs.system_server",
@@ -201,6 +203,7 @@ java_library_static {
 
     static_libs: [
         "android.frameworks.vibrator-V1-java", // AIDL
+        "kotlin-stdlib",
         "android.frameworks.devicestate-V1-java", // AIDL
         "android.hardware.authsecret-V1.0-java",
         "android.hardware.authsecret-V1-java",
