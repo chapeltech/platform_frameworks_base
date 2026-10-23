@@ -576,6 +576,10 @@ interface IWindowManager
      */
     void registerShortcutKey(in long shortcutCode, IShortcutService keySubscriber);
 
+    /** SystemUI-only, expiring external-desktop command lease. Not an APK input API. */
+    boolean setWonadShortcutLease(int displayId, int userId, long generation,
+            long expiresElapsedRealtime, IShortcutService receiver);
+
     /**
      * Create an input consumer by name and display id.
      */
@@ -1252,4 +1256,36 @@ interface IWindowManager
      * Returns whether the display with {@code displayId} ignores orientation request.
      */
     boolean getIgnoreOrientationRequest(int displayId);
+
+    /** SystemUI-only external-task focus lease, independent of shortcut capture. */
+    boolean setWonadFocusLease(int displayId, int userId, long generation,
+            long expiresElapsedRealtime, in IBinder[] taskTokens, IBinder owner);
+
+    /** SystemUI-only authoritative focus observation, including empty desktops. */
+    int getWonadFocusedDisplayId();
+
+    /** SystemUI-only native-object bridge; never exposed by the APK SDK. */
+    long[] getWonadNativeDisplayState(in int[] displayIds);
+    long[] getWonadNativeTaskState(int userId, long generation, IBinder owner,
+            in IBinder[] taskTokens);
+    boolean setWonadNativeUiLease(int displayId, int userId, long generation,
+            long expiresElapsedRealtime, IBinder owner);
+    boolean applyWonadNativeFrame(int userId, long generation, IBinder owner,
+            in IBinder[] taskTokens, in int[] expectedUids, in long[] current, in long[] desired);
+
+    boolean applyWonadNativeSignedFrame(int userId, long generation, IBinder owner,
+            in IBinder[] taskTokens, in int[] expectedUids, in long[] current, in long[] desired);
+    boolean isWonadNativeFrameApplied(int userId, long generation, IBinder owner,
+            in IBinder[] taskTokens, in int[] expectedUids, in long[] current, in long[] desired);
+    boolean operateWonadNativeTask(int userId, long generation, IBinder owner,
+            IBinder taskToken, int expectedUid, boolean close);
+    boolean transferWonadNativeTask(int userId, long generation, IBinder owner,
+            IBinder taskToken, int expectedUid, long destinationDisplayToken);
+    boolean isWonadNativeUiDisplay(int displayId);
+
+    /** Opaque exact-task namespace across SystemUI death; SystemUI-only. */
+    long getWonadNativeIdentityEpoch();
+
+    /** Native protected-window observation; SystemUI-only, no APK authority. */
+    boolean isWonadNativeInteractionBlocked(int userId);
 }

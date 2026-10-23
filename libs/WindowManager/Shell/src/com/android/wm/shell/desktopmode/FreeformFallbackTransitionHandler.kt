@@ -37,6 +37,7 @@ class FreeformFallbackTransitionHandler(
     ): Boolean {
         for (change in info.changes) {
             val taskInfo = change.taskInfo ?: continue
+            if (!org.wonad.desktop.broker.WonadNativeUi.allowStockPolicy(taskInfo.displayId)) continue
             val repository = desktopUserRepositories.getProfile(taskInfo.userId)
             if (!repository.isActiveTask(taskInfo.taskId)) continue
             val leash = change.leash

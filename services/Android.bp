@@ -442,6 +442,7 @@ system_java_library {
 
     required: [
         "AppCompatConfig",
+        "libwonad_input_jni",
         "libukey2_jni_shared",
         "submerge_java_shared",
         "libtrust_token_jni",
