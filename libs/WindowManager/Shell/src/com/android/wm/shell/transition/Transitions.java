@@ -109,6 +109,12 @@ import com.android.wm.shell.sysui.ShellInit;
 import com.android.wm.shell.transition.tracing.PerfettoTransitionTracer;
 import com.android.wm.shell.transition.tracing.TransitionTracer;
 
+import android.os.Binder;
+import android.os.Bundle;
+import android.os.RemoteCallback;
+import android.os.UserHandle;
+import org.wonad.focusproposal.v2.FocusQueryCoordinator2;
+
 import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -2103,9 +2109,14 @@ public class Transitions implements RemoteCallable<Transitions>,
     private static class IShellTransitionsImpl extends IShellTransitions.Stub
             implements ExternalInterfaceBinder {
         private Transitions mTransitions;
+        private final Context mFocusQueryContext;
+        private final Object mFocusQueryOwner = new Object();
+        private final FocusQueryCoordinator2 mFocusQueries = ShellFocusQueries.coordinator;
 
         IShellTransitionsImpl(Transitions transitions) {
             mTransitions = transitions;
+            mFocusQueryContext = transitions.mContext;
+            mFocusQueries.attach(mFocusQueryOwner);
         }
 
         /**
@@ -2113,8 +2124,30 @@ public class Transitions implements RemoteCallable<Transitions>,
          */
         @Override
         public void invalidate() {
+            mFocusQueries.invalidate(mFocusQueryOwner);
             mTransitions.mHomeTransitionObserver.invalidate(mTransitions);
             mTransitions = null;
+        }
+
+        @Override
+        public void requestFocusedDisplay(long token, RemoteCallback callback) {
+            // Original Binder caller checked BEFORE any identity clearing/worker/query/response.
+            // Captured final Context still enforces this after interface invalidation.
+            mFocusQueryContext.enforceCallingPermission(
+                    "android.permission.MANAGE_ACTIVITY_TASKS", "requestFocusedDisplay");
+            if (token <= 0 || callback == null) return;
+            int callingUser = UserHandle.getUserId(Binder.getCallingUid());
+            long identity = Binder.clearCallingIdentity();
+            try {
+                mFocusQueries.request(mFocusQueryOwner, token, callingUser, response -> {
+                    Bundle data = new Bundle();
+                    data.putLong("request_token", response.getRequestToken());
+                    data.putInt("display_id", response.getDisplayId());
+                    data.putString("status", response.getStatus());
+                    callback.sendResult(data);
+                    return kotlin.Unit.INSTANCE;
+                });
+            } finally { Binder.restoreCallingIdentity(identity); }
         }
 
         @Override

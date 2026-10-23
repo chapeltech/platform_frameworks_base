@@ -334,6 +334,7 @@ final class InputMonitor {
             w.getSurfaceTouchableRegion(mTmpRegion, w.mAttrs);
             inputWindowHandle.setTouchableRegion(mTmpRegion);
         }
+        WonadNativeBridge.configureInput(mService, w, inputWindowHandle);
     }
 
     void setUpdateInputWindowsNeededLw() {

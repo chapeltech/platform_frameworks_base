@@ -18,6 +18,8 @@ package com.android.wm.shell.desktopmode.api;
 
 import android.app.ActivityManager.RunningTaskInfo;
 import android.app.PendingIntent;
+import android.content.ComponentName;
+import android.os.IBinder;
 import android.os.Bundle;
 import android.window.RemoteTransition;
 import com.android.wm.shell.desktopmode.IDesktopTaskListener;
@@ -111,6 +113,13 @@ interface IDesktopMode {
 
     /** Move a task with given `taskId` to external display */
     void moveToExternalDisplay(int taskId, in DesktopModeTransitionSource transitionSource);
+
+    /** Trusted phone Recents entry point. Observations identify one live task;
+     * only Wonad's OS adapter chooses the destination and performs the move. */
+    boolean canSendTaskToWonad(int taskId, int userId, long lastActiveTime,
+            in ComponentName baseActivity, in IBinder taskToken);
+    boolean sendTaskToWonad(int taskId, int userId, long lastActiveTime,
+            in ComponentName baseActivity, in IBinder taskToken);
 
     /** Start a transition when launching an intent in desktop mode */
     void startLaunchIntentTransition(in PendingIntent pendingIntent, in Bundle options, in int displayId);

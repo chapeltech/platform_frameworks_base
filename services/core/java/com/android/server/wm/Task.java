@@ -927,11 +927,13 @@ class Task extends TaskFragment {
     boolean reparent(Task preferredRootTask, boolean toTop,
             @ReparentMoveRootTaskMode int moveRootTaskMode, boolean animate, boolean deferResume,
             String reason) {
+        WonadNativeWallpaperRoutes.enforceReparent(this, preferredRootTask);
         final ActivityTaskSupervisor supervisor = mTaskSupervisor;
         final RootWindowContainer root = mRootWindowContainer;
         final Task sourceRootTask = getRootTask();
         final Task toRootTask = supervisor.getReparentTargetRootTask(this, preferredRootTask,
                 toTop);
+        WonadNativeWallpaperRoutes.enforceReparent(this, toRootTask);
         if (toRootTask == sourceRootTask) {
             return false;
         }
@@ -1392,6 +1394,8 @@ class Task extends TaskFragment {
     @Override
     @Nullable
     ActivityRecord getTopResumedActivity() {
+        final ActivityRecord wonadFocused = WonadFocusBridge.focusedResumedActivity(this);
+        if (wonadFocused != null) return wonadFocused;
         if (!isLeafTask()) {
             for (int i = mChildren.size() - 1; i >= 0; --i) {
                 ActivityRecord resumedActivity = mChildren.get(i).asTask().getTopResumedActivity();
@@ -1613,6 +1617,7 @@ class Task extends TaskFragment {
      * @return whether it was actually moved (vs already being top).
      */
     final boolean moveActivityToFront(ActivityRecord newTop) {
+        WonadNativeWallpaperRoutes.enforceReparent(newTop, this);
         ProtoLog.i(WM_DEBUG_ADD_REMOVE, "Removing and adding activity %s to root task at top "
                 + "callers=%s", newTop, Debug.getCallers(4));
         final TaskFragment taskFragment = newTop.getTaskFragment();
@@ -1636,6 +1641,7 @@ class Task extends TaskFragment {
 
     @Override
     void addChild(WindowContainer child, int index) {
+        WonadNativeWallpaperRoutes.enforceReparent(child, this);
         if (isVisibilityBarrier()) {
             throw new IllegalStateException("Visibility barrier should be empty.");
         }
@@ -2412,7 +2418,11 @@ class Task extends TaskFragment {
         int minWidth = getMinWidth();
         int minHeight = getMinHeight();
         // Use Display specific min sizes when there is one associated with this Task.
-        final int defaultMinSizeDp = mDisplayContent == null
+        // Native Wonad owns external placement. Keep application-requested
+        // minima below, but do not add Android's synthetic caption/touch-target
+        // minimum to an exact ordinary leaf on a native attachment.
+        final int defaultMinSizeDp = WonadNativeBridge.usesClientBounds(this) ? 0
+                : mDisplayContent == null
                 ? DEFAULT_MIN_TASK_SIZE_DP : mDisplayContent.mMinSizeOfResizeableTaskDp;
         final float density = (float) parentConfig.densityDpi / DisplayMetrics.DENSITY_DEFAULT;
         final int defaultMinSize = (int) (defaultMinSizeDp * density);
@@ -2462,6 +2472,10 @@ class Task extends TaskFragment {
     /** Computes bounds for {@link WindowConfiguration#WINDOWING_MODE_FREEFORM}. */
     private void computeFreeformBounds(@NonNull Rect outBounds,
             @NonNull Configuration newParentConfig) {
+        // The native adapter has already validated this ordinary leaf's exact
+        // full-monitor rectangle. Stock caption/stable-inset fitting must not
+        // reposition it; phone/system/fixed UI and non-native tasks stay stock.
+        if (WonadNativeBridge.usesClientBounds(this)) return;
         // by policy, make sure the window remains within parent somewhere
         final float density =
                 ((float) newParentConfig.densityDpi) / DisplayMetrics.DENSITY_DEFAULT;
@@ -2961,7 +2975,8 @@ class Task extends TaskFragment {
     void positionChildAt(int position, WindowContainer child, boolean includingParents) {
         final boolean toTop = position >= (mChildren.size() - 1);
         position = getAdjustedChildPosition(child, position);
-        super.positionChildAt(position, child, includingParents);
+        super.positionChildAt(position, child,
+                WonadFocusBridge.propagateTaskPosition(this, child, toTop, includingParents));
 
         // Log positioning.
         if (DEBUG_TASK_MOVEMENT) Slog.d(TAG_WM, "positionChildAt: child=" + child
@@ -2971,6 +2986,7 @@ class Task extends TaskFragment {
         if (task != null) {
             task.updateTaskMovement(toTop, position == POSITION_BOTTOM, position);
         }
+        WonadFocusBridge.onTaskRaised(this, child, toTop, includingParents);
     }
 
     @Override
@@ -3010,6 +3026,7 @@ class Task extends TaskFragment {
 
     // TODO: Consolidate this with Task.reparent()
     void reparent(Task rootTask, int position, boolean moveParents, String reason) {
+        WonadNativeWallpaperRoutes.enforceReparent(this, rootTask);
         if (DEBUG_ROOT_TASK) Slog.i(TAG, "reParentTask: removing taskId=" + mTaskId
                 + " from rootTask=" + getRootTask());
         EventLogTags.writeWmTaskRemoved(mTaskId, getRootTaskId(), getDisplayId(),
@@ -3102,7 +3119,10 @@ class Task extends TaskFragment {
     @Override
     void onDisplayChanged(DisplayContent dc) {
         final int lastDisplayId = getDisplayId();
+        final DisplayContent previousWonadDisplay = getDisplayContent();
         super.onDisplayChanged(dc);
+        // A stock phone launch need not physically remove the old monitor.
+        WonadUiBridge.onTaskDisplayChanged(this, previousWonadDisplay);
         if (isLeafTask()) {
             final int displayId = (dc != null) ? dc.getDisplayId() : INVALID_DISPLAY;
             //Send the callback when the task reparented to another display.
@@ -4698,6 +4718,12 @@ class Task extends TaskFragment {
      */
     @Override
     boolean setForceHidden(@FlagForceHidden int flags, boolean set) {
+        // A parked Wonad screen hides content without leaving its desk. The
+        // stock moveToBack path reparents organizer children behind Home.
+        if (flags == FLAG_FORCE_HIDDEN_FOR_WONAD
+                || flags == FLAG_FORCE_HIDDEN_FOR_WONAD_POLICY) {
+            return super.setForceHidden(flags, set);
+        }
         final boolean wasHidden = isForceHidden();
         final boolean wasVisible = isVisible();
         if (!super.setForceHidden(flags, set)) {
@@ -6504,6 +6530,7 @@ class Task extends TaskFragment {
     }
 
     void reparent(TaskDisplayArea newParent, boolean onTop) {
+        WonadNativeWallpaperRoutes.enforceReparent(this, newParent);
         if (newParent == null) {
             throw new IllegalArgumentException("Task can't reparent to null " + this);
         }
